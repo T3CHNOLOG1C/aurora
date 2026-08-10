@@ -1,6 +1,54 @@
 #ifndef DOLPHIN_TYPES_H
 #define DOLPHIN_TYPES_H
 
+/* The real SDK's dolphin/types.h (extern/dolphin/include/dolphin/types.h
+ * in the decomp) transitively pulls in <string.h>/<stdio.h>/<stdarg.h>/
+ * <ctype.h> from this exact location, and melee code relies on that --
+ * dolphin/types.h is included nearly everywhere, so most melee TUs get
+ * memcpy/memset/strncmp/va_list etc "for free" without including those
+ * headers directly. Aurora's types.h didn't do this. */
+#include <ctype.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+
+/* Likewise, the decomp's <stdio.h> resolves to src/MSL/stdio.h (the
+ * Metrowerks C library's own stdio, reached via -isystemsrc/MSL), not the
+ * real one -- and that header, not this location, is where
+ * sysdolphin/baselib/debug.h's __file_handle/__idle_proc device-driver
+ * typedefs actually come from in the original build. debug.h itself
+ * doesn't include <MSL/stdio.h>; it just relies on some earlier header in
+ * the chain (usually this one, dolphin/types.h, included nearly
+ * everywhere) having already pulled it in ambiently. On the real system
+ * <stdio.h> those two types don't exist at all (they're MSL/Metrowerks C
+ * library internals, part of a custom low-level I/O device-driver
+ * interface -- see debug.c's report_func/HSD_LogInit, which hooks
+ * MSL's stdout->write_proc; that mechanism has no host libc equivalent
+ * and isn't ported, see pc_port.md). Declaring just the two typedefs melee
+ * source actually references is enough for debug.h's report_func()
+ * prototype (used everywhere via the HSD_ASSERT* macros) to parse; it
+ * does NOT make debug.c's MSL-FILE-internals-dependent function bodies
+ * portable, those are excluded from the native build separately. */
+typedef unsigned long __file_handle;
+typedef void (*__idle_proc)(void);
+/* Also from src/MSL/stddef.h, same ambient-availability story. */
+typedef unsigned int usize_t;
+
+/* From src/MSL/stdarg.h, used directly (not through the standard
+ * va_arg macro) by exactly one file: src/melee/ef/efalt.c's
+ * EFALT_VA_ARG macro. MSL's va_list on the PPC/MWCC ABI is just a raw
+ * pointer, manually advanced; the real host va_list (e.g. x86_64 SysV)
+ * is an opaque multi-field struct that can't be safely walked the same
+ * way -- this hasn't been bridged yet (see pc_port.md). Compiles, but
+ * traps loudly if actually reached at runtime rather than risk quietly
+ * reading garbage into particle-effect parameters. */
+#define _var_arg_typeof(e) 0
+static inline void* __va_arg(void* list, unsigned char type) {
+    (void) list;
+    (void) type;
+    __builtin_trap();
+}
+
 #if _WIN64 || __LP64__
 #define BIT_64 1
 #else
@@ -68,6 +116,10 @@ typedef int BOOL;
 #ifndef nullptr
 #define nullptr NULL
 #endif
+#endif
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
 #if defined(__MWERKS__)

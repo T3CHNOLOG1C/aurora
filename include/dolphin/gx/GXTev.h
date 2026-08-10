@@ -27,6 +27,11 @@ void GXSetAlphaCompare(GXCompare comp0, u8 ref0, GXAlphaOp op, GXCompare comp1, 
 void GXSetZTexture(GXZTexOp op, GXTexFmt fmt, u32 bias);
 void GXSetTevOrder(GXTevStageID stage, GXTexCoordID coord, GXTexMapID map, GXChannelID color);
 void GXSetNumTevStages(u8 nStages);
+/* Wii-only feature, no-op on GameCube on real hardware too -- see
+ * GXEnum.h. Matches the real SDK's untyped-int signature exactly
+ * (extern/dolphin/include/dolphin/gx.h declares it this way, not with
+ * GXTevStageID/GXTevClampMode params). */
+void GXSetTevClampMode(int stage, int mode);
 
 #ifdef __cplusplus
 }

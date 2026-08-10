@@ -578,6 +578,15 @@ typedef enum { GX_TB_ZERO, GX_TB_ADDHALF, GX_TB_SUBHALF, GX_MAX_TEVBIAS } GXTevB
 
 typedef enum { GX_CS_SCALE_1, GX_CS_SCALE_2, GX_CS_SCALE_4, GX_CS_DIVIDE_2, GX_MAX_TEVSCALE } GXTevScale;
 
+/* Wii-only TEV feature; the real GameCube SDK keeps the enum and a
+ * GXSetTevClampMode() entry point that's an unconditional no-op assert
+ * ("not available on this hardware") -- see
+ * extern/dolphin/src/dolphin/gx/GXTev.c in the decomp. Melee (built for
+ * GC) calls it but the mode value is never actually applied on real
+ * hardware either, so a no-op here matches original behavior exactly,
+ * not just approximates it. */
+typedef enum { GX_TC_LINEAR, GX_TC_GE, GX_TC_EQ, GX_TC_LE, GX_MAX_TEVCLAMPMODE } GXTevClampMode;
+
 typedef enum {
   GX_TEV_KCSEL_8_8 = 0x00,
   GX_TEV_KCSEL_7_8 = 0x01,

@@ -242,4 +242,10 @@ void GXSetTevSwapModeTable(GXTevSwapSel id, GXTevColorChan red, GXTevColorChan g
   GX_WRITE_RAS_REG(__gx->tevKsel[kselIdx + 1]);
   __gx->bpSent = 1;
 }
+
+void GXSetTevClampMode(int /*stage*/, int /*mode*/) {
+  // Wii-only feature; unconditional no-op on GameCube on real hardware
+  // too (extern/dolphin/src/dolphin/gx/GXTev.c's implementation is just
+  // an assert saying so). See GXEnum.h.
+}
 }
