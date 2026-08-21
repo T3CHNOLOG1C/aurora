@@ -26,6 +26,9 @@ namespace {
 aurora::Module Log("aurora::card");
 std::array<std::unique_ptr<aurora::card::ICard>, 2> CardChannels = {{}};
 std::array<std::filesystem::path, 2> cardPaths;
+/* CARDGetXferredBytes is a control-block query on retail. Aurora performs
+ * card I/O synchronously, so retain the completed byte count per channel. */
+std::array<s32, 2> transferredBytes = {{0, 0}};
 
 constexpr uint16_t CARD_SECTOR_SIZE = 8192;
 
@@ -560,9 +563,7 @@ s32 CARDGetXferredBytes(const s32 chan) {
   }
   if (!CARD_READY(chan))
     return CARD_RESULT_NOCARD;
-  // TODO:
-  CARD_STUB
-  return CARD_RESULT_READY;
+  return transferredBytes[chan];
 }
 // these two funcs are out of scope for aurora::card. stubbed for now
 s32 CARDMount(const s32 chan, void* workArea [[maybe_unused]], CARDCallback detachCallback [[maybe_unused]]) {
@@ -764,6 +765,8 @@ s32 CARDRead(const CARDFileInfo* fileInfo, void* addr, s32 length, const s32 off
 
   card->seek(handle, offset, aurora::card::SeekOrigin::Begin);
   auto res = card->fileRead(handle, addr, length);
+  transferredBytes[fileInfo->chan] =
+      res == aurora::card::ECardResult::READY ? length : 0;
 
   if (res != aurora::card::ECardResult::READY)
     Log.error("Failed to read {} bytes from card", length);
@@ -792,6 +795,8 @@ s32 CARDWrite(const CARDFileInfo* fileInfo, const void* addr, const s32 length, 
 
   card->seek(handle, offset, aurora::card::SeekOrigin::Begin);
   auto res = card->fileWrite(handle, addr, length);
+  transferredBytes[fileInfo->chan] =
+      res == aurora::card::ECardResult::READY ? length : 0;
 
   if (res != aurora::card::ECardResult::READY) {
     Log.error("Failed to write {} bytes to card", length);
