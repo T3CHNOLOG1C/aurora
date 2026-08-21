@@ -298,10 +298,15 @@ struct AttrArray {
   u32 size;
   u8 stride;
   bool le = true;
+  // Source bytes are big-endian but have been blind 32-bit-word byte swapped by a
+  // host-side loader (GX_ARRAY_WORDSWAPPED_BE). Un-done on the uploaded copy, so
+  // `le` stays false and the shader is unaffected -- see push_gx_draw.
+  bool wordSwapped = false;
   gfx::Range cachedRange;
 };
 inline bool operator==(const AttrArray& lhs, const AttrArray& rhs) {
-  return lhs.data == rhs.data && lhs.size == rhs.size && lhs.stride == rhs.stride && lhs.le == rhs.le;
+  return lhs.data == rhs.data && lhs.size == rhs.size && lhs.stride == rhs.stride && lhs.le == rhs.le &&
+         lhs.wordSwapped == rhs.wordSwapped;
 }
 inline bool operator!=(const AttrArray& lhs, const AttrArray& rhs) { return !(lhs == rhs); }
 

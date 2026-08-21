@@ -24,7 +24,7 @@ uint32_t sDlWritePos = 0;
 
 namespace {
 constexpr Module Log{"aurora::gx::fifo"};
-constexpr auto kProcessingMode = ProcessingMode::Thread;
+constexpr auto kProcessingMode = ProcessingMode::Inline;
 constexpr uint32_t kDrawBatchSize = 1;
 
 bool sFrameActive = false;

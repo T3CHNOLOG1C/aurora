@@ -1,6 +1,33 @@
 #include "gx.hpp"
 #include "__gx.h"
 
+#include <cstdio>
+#include <cstdlib>
+
+// melee-pc diagnostic (MELEE_PC_GXLOG="A,B"): dump every channel-control,
+// channel-color and light-load call during the 3-frame windows starting at
+// retrace A and retrace B, so a clean window can be diffed against a dark one
+// from the same run. Remove once the fighter-darkening bug is rooted.
+extern "C" u32 VIGetRetraceCount(void);
+static bool melee_pc_gxlog_active() {
+  static long w1 = -1, w2 = -1;
+  static bool parsed = false;
+  if (!parsed) {
+    parsed = true;
+    if (const char* env = getenv("MELEE_PC_GXLOG")) {
+      w1 = strtol(env, nullptr, 10);
+      if (const char* comma = strchr(env, ',')) {
+        w2 = strtol(comma + 1, nullptr, 10);
+      }
+    }
+  }
+  if (w1 < 0) {
+    return false;
+  }
+  u32 f = VIGetRetraceCount();
+  return (f >= (u32)w1 && f < (u32)w1 + 3) || (w2 >= 0 && f >= (u32)w2 && f < (u32)w2 + 3);
+}
+
 extern "C" {
 void GXInitLightAttn(GXLightObj* light_, float a0, float a1, float a2, float k0, float k1, float k2) {
   auto* light = reinterpret_cast<GXLightObj_*>(light_);
@@ -134,6 +161,38 @@ void GXLoadLightObjImm(GXLightObj* light_, GXLightID id) {
   u32 idx = std::log2<u32>(id);
   auto* light = reinterpret_cast<const GXLightObj_*>(light_);
 
+  // melee-pc diagnostic (MELEE_PC_LIGHTLOG): log each GX light slot load only
+  // when its payload changes, tagged with the aurora frame index -- catches
+  // upstream light-state divergence at the exact frame it first happens.
+  {
+    static const bool sLog = getenv("MELEE_PC_LIGHTLOG") != nullptr;
+    if (sLog) {
+      extern u32 VIGetRetraceCount(void);
+      struct Snap { u32 color; float px, py, pz, nx, ny, nz; bool valid; };
+      static Snap sLast[8];
+      u32 colorPacked = (static_cast<u32>(light->color.r) << 24) | (static_cast<u32>(light->color.g) << 16) |
+                        (static_cast<u32>(light->color.b) << 8) | static_cast<u32>(light->color.a);
+      if (idx < 8) {
+        Snap& s = sLast[idx];
+        if (!s.valid || s.color != colorPacked || s.px != light->px || s.py != light->py || s.pz != light->pz ||
+            s.nx != light->nx || s.ny != light->ny || s.nz != light->nz) {
+          std::fprintf(stderr, "PROGDBG GXLIGHT frame=%u slot=%u col=%08x pos=%.1f,%.1f,%.1f dir=%.2f,%.2f,%.2f\n",
+                       VIGetRetraceCount(), idx, colorPacked, light->px, light->py, light->pz,
+                       light->nx, light->ny, light->nz);
+          s = Snap{colorPacked, light->px, light->py, light->pz, light->nx, light->ny, light->nz, true};
+        }
+      }
+    }
+  }
+  if (melee_pc_gxlog_active()) {
+    std::fprintf(stderr,
+                 "PROGDBG GXLOG frame=%u LOAD slot=%u col=%02x%02x%02x%02x a=%.3f,%.3f,%.3f k=%.3f,%.3f,%.3f "
+                 "pos=%.1f,%.1f,%.1f dir=%.3f,%.3f,%.3f\n",
+                 VIGetRetraceCount(), idx, light->color.r, light->color.g, light->color.b, light->color.a, light->a0,
+                 light->a1, light->a2, light->k0, light->k1, light->k2, light->px, light->py, light->pz, light->nx,
+                 light->ny, light->nz);
+  }
+
   // XF bulk write: 16 values at light base address
   // Light addresses: 0x600 + idx * 0x10
   u32 addr = 0x600 + idx * 0x10;
@@ -184,6 +243,9 @@ void GXSetChanAmbColor(GXChannelID id, GXColor color) {
   // XF ambient color registers: 0x100A (chan 0), 0x100B (chan 1)
   u32 packed = (static_cast<u32>(color.r) << 24) | (static_cast<u32>(color.g) << 16) |
                (static_cast<u32>(color.b) << 8) | static_cast<u32>(color.a);
+  if (melee_pc_gxlog_active()) {
+    std::fprintf(stderr, "PROGDBG GXLOG frame=%u AMB id=%d col=%08x\n", VIGetRetraceCount(), (int)id, packed);
+  }
   if (id == GX_COLOR0 || id == GX_ALPHA0) {
     __gx->ambColor[0] = packed;
     GX_WRITE_XF_REG(0xA, packed);
@@ -209,6 +271,9 @@ void GXSetChanMatColor(GXChannelID id, GXColor color) {
   // XF material color registers: 0x100C (chan 0), 0x100D (chan 1)
   u32 packed = (static_cast<u32>(color.r) << 24) | (static_cast<u32>(color.g) << 16) |
                (static_cast<u32>(color.b) << 8) | static_cast<u32>(color.a);
+  if (melee_pc_gxlog_active()) {
+    std::fprintf(stderr, "PROGDBG GXLOG frame=%u MAT id=%d col=%08x\n", VIGetRetraceCount(), (int)id, packed);
+  }
   if (id == GX_COLOR0 || id == GX_ALPHA0) {
     __gx->matColor[0] = packed;
     GX_WRITE_XF_REG(0xC, packed);
@@ -272,6 +337,12 @@ void GXSetChanCtrl(GXChannelID id, bool lightingEnabled, GXColorSrc ambSrc, GXCo
     return;
   }
   CHECK(id >= GX_COLOR0 && id <= GX_ALPHA1, "bad channel {}", static_cast<int>(id));
+
+  if (melee_pc_gxlog_active()) {
+    std::fprintf(stderr, "PROGDBG GXLOG frame=%u CHAN id=%d en=%d amb=%d mat=%d mask=%02x df=%d af=%d\n",
+                 VIGetRetraceCount(), (int)id, (int)lightingEnabled, (int)ambSrc, (int)matSrc, lightState, (int)diffFn,
+                 (int)attnFn);
+  }
 
   // Build XF channel control register
   u32 reg = 0;

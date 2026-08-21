@@ -2,6 +2,9 @@
 #include "__gx.h"
 #include "../../gx/fifo.hpp"
 
+#include <cstdio>
+#include <cstdlib>
+
 namespace {
 // Track vertex count between GXBegin/GXEnd for mismatch detection
 u16 sBeginNVerts = 0;
@@ -32,9 +35,27 @@ void post_begin(u16 nVerts) {
 }
 } // namespace
 
+/* TEMPORARY diagnostic (2026-08-11): log immediate-mode primitive submissions,
+ * for the "SIS text emits no geometry" investigation.
+ * MELEE_PC_TRACE_BEGIN=<count>. */
+static int melee_trace_begin_budget() {
+  static int budget = -1;
+  if (budget < 0) {
+    const char* env = std::getenv("MELEE_PC_TRACE_BEGIN");
+    budget = env != nullptr ? std::atoi(env) : 0;
+  }
+  return budget;
+}
+static int melee_trace_begin_count = 0;
+
 extern "C" {
 
 void GXBegin(GXPrimitive primitive, GXVtxFmt vtxFmt, u16 nVerts) {
+  if (melee_trace_begin_count < melee_trace_begin_budget()) {
+    ++melee_trace_begin_count;
+    std::fprintf(stderr, "PROGDBG GXBegin #%d prim=%#x fmt=%d nVerts=%u caller=%p\n", melee_trace_begin_count,
+                 static_cast<unsigned>(primitive), static_cast<int>(vtxFmt), nVerts, __builtin_return_address(0));
+  }
   pre_begin();
 
   const u8 drawCmd = static_cast<u8>(vtxFmt) | static_cast<u8>(primitive);
@@ -74,6 +95,9 @@ void GXBeginIndexed(GXVtxFmt vtxFmt, u16 nVerts, const u16* indices, u32 nIndice
 }
 
 void GXEnd() {
+  if (melee_trace_begin_count < melee_trace_begin_budget()) {
+    std::fprintf(stderr, "PROGDBG GXEnd sInBegin=%d caller=%p\n", sInBegin, __builtin_return_address(0));
+  }
   if (sInBegin) {
     u32 bytesWritten = aurora::gx::fifo::get_buffer_size() - sBeginFifoSize;
     if (sBeginAuto) {

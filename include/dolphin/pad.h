@@ -205,6 +205,10 @@ void PADSetPortForIndex(u32 index, u32 port);
 s32 PADGetIndexForPort(u32 port);
 void PADGetVidPid(u32 port, u32* vid, u32* pid);
 void PADClearPort(u32 port);
+/* Re-enumerates SDL gamepads: opens any connected device not yet in the
+ * controller map and drops entries whose device has disconnected. Returns
+ * the number of newly added controllers. */
+u32 PADRescanControllers(void);
 const char* PADGetName(u32 port);
 void PADSetButtonMapping(u32 port, PADButtonMapping mapping);
 void PADSetAllButtonMappings(u32 port, PADButtonMapping buttons[PAD_BUTTON_COUNT]);

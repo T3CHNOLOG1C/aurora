@@ -2,6 +2,10 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
+#elif defined(__linux__)
+#include <sys/mman.h>
+#include <cerrno>
+#include <cstring>
 #endif
 
 #include "fmt/base.h"
@@ -134,6 +138,76 @@ static void* AllocMEM1(u32 size) {
   }
 
   assert(result == mem1Address);
+  return result;
+}
+#elif defined(__linux__)
+// melee-pc local patch: decomp code (e.g. sysdolphin/baselib/initialize.c's
+// HSD_OSInit, `u32 old_arena_lo = (u32) OSGetArenaLo()`) truncates MEM1
+// arena pointers to u32 before using them, matching the real SDK's 32-bit
+// `void*` -- lossless on the original 32-bit target. A plain calloc() has
+// no address guarantee on Linux; large allocations go through mmap and
+// commonly land far above 4GB, silently truncating to an unrelated,
+// unmapped address (this is what broke `HSD_OSInit`'s `OSCreateHeap` call,
+// producing a garbage `HSD_Synth_804D6018` heap handle and an unmapped
+// pointer out of the first `OSAllocFromHeap` -- confirmed by checking the
+// returned pointer against /proc/<pid>/maps). Request a fixed, low address
+// explicitly instead, mirroring what this file already does for Windows
+// debug builds above.
+//
+// That address MUST be exactly 0x80000000, not merely "some low address" --
+// this was originally 0x20000000 (still lossless for u32 truncation) and
+// that was a real, separate bug: decomp code itself checks addresses
+// against the real hardware's cached-MEM1-logical convention directly, not
+// just through this file's truncation logic -- e.g. melee/lb/lbfile.c's
+// lbFile_800164A4 picks its DMA type via `dest >= 0x80000000`, matching
+// real hardware where any legitimate MEM1 destination pointer already
+// satisfies that. With MEM1 at 0x20000000, every such check saw the
+// buffer as "not MEM1" and routed archive/asset reads through the
+// ARAM-relay DMA path instead, with the real destination reinterpreted as
+// a bogus multi-hundred-MB ARAM offset -- the actual buffer was left
+// all-zeros, silently, until HSD_ArchiveParse's own built-in
+// byte-order/size sanity check caught it downstream. 0x80000000 satisfies
+// both this file's truncation requirement *and* every one of decomp's own
+// "is this a cached MEM1 address" checks, because it's the address real
+// hardware actually uses -- there's no other value that's simultaneously
+// correct for both.
+static void* AllocMEM1(u32 size) {
+  void* fixedAddr = reinterpret_cast<void*>(0x80000000);
+#if defined(MELEE_PC_DOLSAN_BUILD)
+  // DolSAN (extern/dolsan) relocates ASan's shadow layout so it no longer
+  // covers this address (see extern/dolsan/cmake/DolSANGekkoProfile.cmake
+  // for the reserved range), so unlike plain system ASan below,
+  // MAP_FIXED_NOREPLACE is safe here and preferred -- it fails loudly on
+  // an unexpected collision instead of silently unmapping whatever's
+  // there. DolSAN-linked build only (MELEE_PC_ASAN_BUILD in
+  // CMakeLists.txt, which now builds against DolSAN's runtime).
+  int mmapFlags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+#elif defined(__SANITIZE_ADDRESS__) || defined(MELEE_PC_ASAN_BUILD)
+  // Plain system ASan (not DolSAN): it reserves this address as part of
+  // its shadow gap even with ASAN_OPTIONS=protect_shadow_gap=0 (that
+  // option only stops ASan from mprotecting it, not from holding a
+  // placeholder mapping there), so MAP_FIXED_NOREPLACE always fails.
+  // MAP_FIXED unmaps whatever's there first instead of refusing -- safe
+  // here specifically because protect_shadow_gap=0 means ASan never
+  // relies on that gap being reserved for its own correctness. This does
+  // NOT fix the real collision (system ASan's LowShadow still overlaps
+  // this address once real writes land here -- see pc_port.md entries
+  // (219)/(272) and extern/dolsan/PLANNING.md); kept only for whoever
+  // builds aurora_os with plain -fsanitize=address directly, outside
+  // melee-pc's own CMake plumbing.
+  int mmapFlags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED;
+#else
+  int mmapFlags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+#endif
+  void* result = mmap(fixedAddr, size, PROT_READ | PROT_WRITE, mmapFlags, -1, 0);
+  if (result == MAP_FAILED) {
+    Log.fatal("MEM1 mmap errno={} ({}) size={:#x}", errno, strerror(errno), size);
+    // No fallback address: anything else would violate decomp's own
+    // ">= 0x80000000" MEM1 checks (see above), which is worse than failing
+    // loudly here.
+    Log.fatal("Failed to allocate MEM1 at 0x80000000 (mmap)");
+    return nullptr;
+  }
   return result;
 }
 #else

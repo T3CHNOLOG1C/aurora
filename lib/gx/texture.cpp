@@ -1,4 +1,6 @@
 #include "texture.hpp"
+#include <cstdio>
+#include <cstdlib>
 
 #include "shader_info.hpp"
 #include "../gfx/tex_palette_conv.hpp"
@@ -140,6 +142,9 @@ constexpr uint32_t div_ceil(uint32_t value, uint32_t divisor) noexcept { return 
 void do_clear_static_texture_cache() noexcept {
   s_textureObjectCaches.clear();
   s_replacementUsers.clear();
+  s_contentCache.clear();
+  s_contentLru.clear();
+  s_contentCacheBytes = 0;
   for (auto& [_, cache] : s_tlutObjectCaches) {
     cache.staticTextureUsers.clear();
   }
@@ -867,6 +872,11 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
       }
     } else if (copyRef != nullptr) {
       handle = copyRef->handle;
+      // TEMP melee-pc diagnostic (results-portrait/magnifier blank EFB textures)
+      if (getenv("MELEE_PC_EFBCOPY_TRACE") != nullptr) {
+        fprintf(stderr, "AUR-BINDCOPY data=%p rev=%u fmt=%d %ux%u\n", obj.data, copyRef->revision, (int)obj.format(),
+                obj.width(), obj.height());
+      }
     } else if (obj.has_data()) {
       handle = texture::resolve_static_texture(obj);
     }
@@ -876,3 +886,7 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
   }
 }
 } // namespace aurora::gx
+
+extern "C" void melee_gx_clear_static_texture_cache(void) {
+  aurora::gx::clear_static_texture_cache();
+}

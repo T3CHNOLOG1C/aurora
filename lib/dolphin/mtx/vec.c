@@ -52,7 +52,11 @@ void PSVECNormalize(const Vec* src, Vec* unit) {
   assert(unit && "VECNormalize():  NULL VecPtr 'unit' ");
 
   sqsum = (src->z * src->z + src->x * src->x) + src->y * src->y;
-  assert(0.0f != sqsum && "VECNormalize():  zero magnitude vector ");
+  // Retail's release build strips this assert (NDEBUG); a zero-magnitude
+  // vector isn't fatal on real hardware, frsqrte(0) is a defined PPC
+  // special case (returns +-Infinity, see ppc_math.h) that quietly
+  // produces a NaN unit vector through the Newton-Raphson refinement below
+  // -- exactly what this port should do too instead of aborting.
 
   rsqrt = ppc_rsqrte(sqsum);
   unit->x = src->x * rsqrt;

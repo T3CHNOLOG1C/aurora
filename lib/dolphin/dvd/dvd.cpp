@@ -1,5 +1,8 @@
+#include <cstdio>
+#include <cstdlib>
 #include <aurora/dvd.h>
 #include <dolphin/dvd.h>
+#include <dolphin/dvd_real.h>
 
 #include <algorithm>
 #include <dolphin/os.h>
@@ -993,6 +996,12 @@ int DVDSetAutoFatalMessaging(BOOL enable) {
 }
 
 s32 DVDConvertPathToEntrynum(const char* pathPtr) {
+  /* melee-pc TEMPORARY diagnostic: every disc path the game resolves.
+   * MELEE_PC_TRACE_DVDOPEN=1 */
+  if (pathPtr != nullptr && std::getenv("MELEE_PC_TRACE_DVDOPEN") != nullptr) {
+    std::fprintf(stderr, "PROGDBG DVDPATH %s\n", pathPtr);
+    std::fflush(stderr);
+  }
   std::lock_guard lock(s_fstLock);
 
   if (!s_initialized || pathPtr == nullptr || s_fstEntries.empty()) {
@@ -1153,7 +1162,13 @@ BOOL DVDChangeDir(const char* dirName) {
   return TRUE;
 }
 
-BOOL DVDReadAsyncPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset, DVDCallback callback, s32 prio) {
+// melee-pc: renamed from `DVDReadAsyncPrio` (declaration + rename comment in
+// dolphin/dvd_real.h) so melee-pc/src/dvd_compat.c can provide its own
+// `DVDReadAsyncPrio` that byte-swaps GC (big-endian) disc data for our
+// little-endian host before handing control back to decomp callbacks, then
+// forwards the real work here. See dvd_compat.c for why this can't be done
+// with a thin wrapper around the public API alone.
+BOOL Aurora_DVDReadAsyncPrio_Real(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset, DVDCallback callback, s32 prio) {
   ASSERTMSGLINE(0x2C7, fileInfo, "DVDReadAsync(): null pointer is specified to file info address  ");
   ASSERTMSGLINE(0x2C8, addr, "DVDReadAsync(): null pointer is specified to addr  ");
 

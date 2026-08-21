@@ -6,6 +6,7 @@
 #include "dolphin/gx/GXAurora.h"
 #include "gx.hpp"
 #include "pipeline.hpp"
+#include "fifo.hpp"
 #include "regs.hpp"
 #include "shader_info.hpp"
 #include "texture.hpp"
@@ -14,6 +15,7 @@
 
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace aurora::gx::fifo {
 namespace {
@@ -141,7 +143,7 @@ constexpr u8 CP_CMD_LOAD_INDX_C = GX_LOAD_INDX_C;
 constexpr u8 CP_CMD_LOAD_INDX_D = GX_LOAD_INDX_D;
 constexpr u8 CP_CMD_CALL_DL = GX_CMD_CALL_DL;
 constexpr u8 CP_CMD_INVAL_VTX = GX_CMD_INVL_VC;
-constexpr u8 CP_CMD_LOAD_BP_REG = GX_LOAD_BP_REG & GX_OPCODE_MASK;
+constexpr u8 CP_CMD_LOAD_BP_REG = GX_LOAD_BP_REG;
 
 // Primitive type mask
 constexpr u8 CP_OPCODE_MASK = GX_OPCODE_MASK;
@@ -178,16 +180,66 @@ u8 line_mode_for_prim(GXPrimitive prim) noexcept {
 static void handle_draw(u8 cmd, Reader& reader) noexcept;
 static void handle_aurora(Reader& reader) noexcept;
 
+/* TEMPORARY diagnostic (2026-08-11): ring buffer of recently dispatched
+ * commands. A FIFO desync is only *detected* at an invalid opcode, which is
+ * some distance after the command that actually consumed the wrong number of
+ * bytes -- this records enough history to find that command. Dumped by the
+ * unknown-opcode path below. */
+struct MeleeCmdTrace {
+  u32 offset;
+  u8 cmd;
+  u16 extra; // draw: vertex count
+  u16 extra2; // draw: vertex size
+};
+static constexpr size_t MeleeCmdTraceCap = 64;
+static std::array<MeleeCmdTrace, MeleeCmdTraceCap> sMeleeCmdTrace{};
+static size_t sMeleeCmdTraceCount = 0;
+static void melee_trace_cmd(u32 offset, u8 cmd, u16 extra = 0, u16 extra2 = 0) noexcept {
+  sMeleeCmdTrace[sMeleeCmdTraceCount % MeleeCmdTraceCap] = {offset, cmd, extra, extra2};
+  ++sMeleeCmdTraceCount;
+}
+
+/* TEMPORARY diagnostic (2026-08-11): see note_display_list()'s declaration. */
+struct MeleeDlTrace {
+  u32 fifoPos;
+  u32 nbytes;
+  const u8* src;
+};
+static constexpr size_t MeleeDlTraceCap = 32;
+static std::array<MeleeDlTrace, MeleeDlTraceCap> sMeleeDlTrace{};
+static size_t sMeleeDlTraceCount = 0;
+
+void note_display_list(u32 fifoPos, u32 nbytes, const void* src) noexcept {
+  sMeleeDlTrace[sMeleeDlTraceCount % MeleeDlTraceCap] = {fifoPos, nbytes, static_cast<const u8*>(src)};
+  ++sMeleeDlTraceCount;
+}
+
 void process(const u8* data, u32 size) noexcept {
   ZoneScoped;
   Reader reader{{data, size}};
 
   while (!reader.empty()) {
+    const u32 cmdOffset = static_cast<u32>(reader.offset());
     const u8 cmd = reader.read<u8>();
-    u8 opcode = cmd & CP_OPCODE_MASK;
-
-    switch (opcode) {
-    case CP_CMD_NOP:
+    melee_trace_cmd(cmdOffset, cmd);
+    /*
+     * Dispatch on the exact command byte, not `cmd & GX_OPCODE_MASK`.
+     *
+     * Only draw commands carry payload in their low bits (the VAT index, 0-7,
+     * hence the 0x80-0xBF range); every other GX opcode is a single exact
+     * value. Masking made the non-draw cases accept seven bogus aliases each --
+     * most damagingly 0x60 and 0x62-0x67, which are not GX opcodes at all but
+     * were being run as `GX_LOAD_BP_REG` (0x61) and silently swallowing four
+     * operand bytes. Real hardware's command processor rejects them.
+     *
+     * The practical cost of the old behaviour was diagnostic: a stream desync
+     * would be absorbed by a bogus alias and only surface several bytes later
+     * at some unrelated byte, so the reported failure point was never where the
+     * desync actually began (see pc_port.md entry (35), where the real anomaly
+     * was at offset 1624 but the fatal was reported at 1630).
+     */
+    switch (cmd) {
+    case GX_NOP:
       continue;
 
     case CP_CMD_LOAD_BP_REG: {
@@ -214,7 +266,7 @@ void process(const u8* data, u32 size) noexcept {
     case CP_CMD_LOAD_INDX_C:
     case CP_CMD_LOAD_INDX_D: {
       ZoneScopedN("LOAD_INDX");
-      const u32 arrayType = GX_POS_MTX_ARRAY + (opcode - CP_CMD_LOAD_INDX_A) / 0x08;
+      const u32 arrayType = GX_POS_MTX_ARRAY + (cmd - CP_CMD_LOAD_INDX_A) / 0x08;
       const u16 srcArrayIdx = reader.read<u16>();
       const u16 addrLen = reader.read<u16>();
 
@@ -223,14 +275,43 @@ void process(const u8* data, u32 size) noexcept {
       auto const& array = g_gxState.arrays[arrayType];
       const u32 srcOffset = static_cast<u32>(srcArrayIdx) * array.stride;
       const u32 srcSize = static_cast<u32>(len) * sizeof(u32);
+      if (array.data == nullptr) {
+        Log.error("melee-pc: LOAD_INDX fail arrayType={} srcArrayIdx={} dstAddr={:#x} len={} opcode={:#x} "
+                  "readerOffset={} readerSize={}",
+                  arrayType, srcArrayIdx, dstAddr, len, cmd, reader.offset(), reader.size());
+        for (u32 dbg = 0; dbg < GX_VA_MAX_ATTR; ++dbg) {
+          Log.error("melee-pc:   array[{}] data={:#x} size={} stride={}", dbg,
+                    reinterpret_cast<uintptr_t>(g_gxState.arrays[dbg].data), g_gxState.arrays[dbg].size,
+                    g_gxState.arrays[dbg].stride);
+        }
+        {
+          const u8* base = reader.data();
+          size_t curOff = reader.offset();
+          size_t start = curOff >= 40 ? curOff - 40 : 0;
+          size_t end = std::min(curOff + 16, reader.size());
+          std::string hex;
+          for (size_t k = start; k < end; ++k) {
+            hex += fmt::format("{:02x}{}", base[k], (k == curOff - 5) ? "|" : " ");
+          }
+          Log.error("melee-pc:   bytes[{}..{}] (cur-5 marked): {}", start, end, hex);
+        }
+      }
       AURORA_ASSERT(array.data != nullptr, "indexed XF load from unmapped array {}", arrayType);
       AURORA_ASSERT(srcOffset <= array.size && srcSize <= array.size - srcOffset,
                     "indexed XF load outside array {}: offset={}, size={}, array size={}", arrayType, srcOffset,
                     srcSize, array.size);
       auto const* srcData = static_cast<const u8*>(array.data) + srcOffset;
-      if (!copy_xf_data(dstAddr, srcData, len, array.le ? std::endian::little : std::endian::big)) {
+      // This path reads whole 32-bit words CPU-side, and a 32-bit word swap of a
+      // big-endian word is exactly its little-endian form, so GX_ARRAY_WORDSWAPPED_BE
+      // needs no separate handling here beyond reading little-endian. (Melee never
+      // registers a matrix array, so this is currently unexercised -- but leaving it
+      // reading big-endian would be a silent, hard-to-find bug for the first caller
+      // that does.)
+      const auto srcEndian =
+          (array.le || array.wordSwapped) ? std::endian::little : std::endian::big;
+      if (!copy_xf_data(dstAddr, srcData, len, srcEndian)) {
 #ifndef NDEBUG
-        Log.debug("Unimplemented indexed XF load (opcode 0x{:02X}, dstAddr=%04x)", opcode, dstAddr);
+        Log.debug("Unimplemented indexed XF load (opcode 0x{:02X}, dstAddr=%04x)", cmd, dstAddr);
 #endif
       }
       break;
@@ -266,8 +347,12 @@ void process(const u8* data, u32 size) noexcept {
     }
 
     default:
-      // Check if it's a draw command (0x80-0xBF range)
-      if (cmd >= 0x80) {
+      /* Draw commands are the only ones with payload in their low bits (the VAT
+       * index), so they are the only ones matched by range: primitive in bits
+       * 3-7, VAT 0-7 in bits 0-2, i.e. 0x80-0xBF. 0xC0 and above is not a
+       * primitive and must not be treated as one. The explicit cases above are
+       * just the VAT-0 fast paths. */
+      if (cmd >= 0x80 && cmd < 0xC0) {
         handle_draw(cmd, reader);
       } else {
         // Hex dump surrounding bytes for debugging
@@ -283,6 +368,79 @@ void process(const u8* data, u32 size) noexcept {
               hex += fmt::format(" {:02x}", data[i]);
           }
           Log.error("  hex dump (pos {}-{}):{}", dumpStart, dumpEnd - 1, hex);
+        }
+        /* TEMPORARY diagnostic (2026-08-11): a desync here means some earlier
+         * command consumed the wrong number of bytes, so the useful evidence is
+         * the vertex-format state that sizes draw commands, plus a much wider
+         * window to find where the stream stopped making sense. */
+        {
+          const size_t pos = reader.offset();
+          const auto& vtxFmt = g_gxState.vtxFmts[g_gxState.lastVtxFmt];
+          std::string desc;
+          for (int i = GX_VA_PNMTXIDX; i <= GX_VA_TEX7; ++i) {
+            if (g_gxState.vtxDesc[i] != GX_NONE) {
+              desc += fmt::format(" attr{}=type{},cnt{},comp{}", i, static_cast<int>(g_gxState.vtxDesc[i]),
+                                  static_cast<int>(vtxFmt.attrs[i].cnt), static_cast<int>(vtxFmt.attrs[i].type));
+            }
+          }
+          Log.error("  lastVtxFmt={} lastVtxSize={} vtxDesc:{}", static_cast<int>(g_gxState.lastVtxFmt),
+                    g_gxState.lastVtxSize, desc.empty() ? " (all GX_NONE)" : desc);
+          const size_t wideStart = (pos > 320) ? pos - 320 : 0;
+          std::string wide;
+          for (size_t i = wideStart; i < pos; i++) {
+            wide += fmt::format("{}{:02x}", (i % 32 == wideStart % 32) ? "\n    " : " ", data[i]);
+          }
+          Log.error("  wide dump (pos {}-{}):{}", wideStart, pos - 1, wide);
+          std::string trace;
+          const size_t traceN = std::min(sMeleeCmdTraceCount, MeleeCmdTraceCap);
+          for (size_t i = 0; i < traceN; ++i) {
+            const auto& e = sMeleeCmdTrace[(sMeleeCmdTraceCount - traceN + i) % MeleeCmdTraceCap];
+            trace += fmt::format("\n    @{:5} cmd={:02x}{}", e.offset, e.cmd,
+                                 (e.cmd >= 0x80) ? fmt::format(" nVerts={} vtxSize={}", e.extra, e.extra2) : "");
+          }
+          Log.error("  last {} commands:{}", traceN, trace);
+
+          /* The decisive comparison: is the byte we choked on what the source
+           * display list actually said? `data` is a sub-span of the FIFO buffer,
+           * so recover its absolute offset to match against the recorded
+           * display-list spans. */
+          {
+            const u8* fifoBase = get_buffer_data();
+            const size_t chunkBase = (fifoBase != nullptr && data >= fifoBase) ? (data - fifoBase) : SIZE_MAX;
+            const size_t badAbs = (chunkBase == SIZE_MAX) ? SIZE_MAX : chunkBase + pos - 1;
+            bool found = false;
+            const size_t dlN = std::min(sMeleeDlTraceCount, MeleeDlTraceCap);
+            for (size_t i = 0; i < dlN && badAbs != SIZE_MAX; ++i) {
+              const auto& d = sMeleeDlTrace[(sMeleeDlTraceCount - 1 - i) % MeleeDlTraceCap];
+              if (d.src == nullptr || badAbs < d.fifoPos || badAbs >= d.fifoPos + d.nbytes) {
+                continue;
+              }
+              found = true;
+              const size_t inDl = badAbs - d.fifoPos;
+              const size_t from = (inDl > 16) ? inDl - 16 : 0;
+              const size_t to = std::min<size_t>(inDl + 16, d.nbytes);
+              std::string srcHex;
+              std::string fifoHex;
+              for (size_t k = from; k < to; ++k) {
+                const char* mark = (k == inDl) ? "*" : " ";
+                srcHex += fmt::format("{}{:02x}", mark, d.src[k]);
+                fifoHex += fmt::format("{}{:02x}", mark, fifoBase[d.fifoPos + k]);
+              }
+              const bool identical = std::equal(d.src + from, d.src + to, fifoBase + d.fifoPos + from);
+              Log.error("  failing byte is inside display list src={} fifoPos={} nbytes={} offsetInDl={}",
+                        static_cast<const void*>(d.src), d.fifoPos, d.nbytes, inDl);
+              Log.error("    source DL:{}", srcHex);
+              Log.error("    in FIFO  :{}", fifoHex);
+              Log.error("    -> {}", identical ? "IDENTICAL (bytes came from the archive as-is)"
+                                               : "DIFFER (FIFO copy is corrupt)");
+              break;
+            }
+            if (!found) {
+              Log.error("  failing byte at abs offset {} is not inside any recorded display list "
+                        "(chunkBase={}, {} DLs recorded) -- it was written by immediate-mode GX calls",
+                        badAbs, chunkBase, dlN);
+            }
+          }
         }
         FATAL("command_processor: unknown opcode 0x{:02X} at pos {}", cmd, reader.offset() - 1);
       }
@@ -336,6 +494,59 @@ static u32 calc_vtx_size(GXVtxFmt fmt) noexcept {
   return vtxSize;
 }
 
+/*
+ * Upload one vertex array's bytes into this frame's storage buffer.
+ *
+ * For GX_ARRAY_WORDSWAPPED_BE arrays the source bytes are big-endian GameCube
+ * data that a host-side loader already ran a blind 32-bit-word byte swap over
+ * (see the GX_ARRAY_* docs in GXGeometry.h). Rather than mutating the caller's
+ * memory -- which cannot be done safely, because a GXSetArray call site has no
+ * vertex count and therefore no exact array extent, so any fixed-size sweep
+ * also flips bytes of whatever unrelated data happens to sit after the array --
+ * the swap is un-done here, on the *copy* being handed to the GPU. That copy is
+ * private to Aurora, so overshooting the real array end is harmless, and after
+ * the transform the data is genuine big-endian, which is what the shader's
+ * existing `le = false` fetch path already expects: no shader variant, no
+ * pipeline-config change, and therefore no pipeline-cache interaction at all.
+ *
+ * The 4-byte grouping of the original swap is anchored to absolute addresses,
+ * so this is only correct for a 4-byte-aligned array pointer. Vertex arrays out
+ * of HSD archives always are; anything else falls back to an untransformed
+ * upload rather than silently producing different garbage.
+ */
+static gfx::Range push_array_storage(const AttrArray& array) noexcept {
+  const auto* src = static_cast<const uint8_t*>(array.data);
+  if (!array.wordSwapped || src == nullptr || array.size == 0) {
+    return gfx::push_storage(src, array.size);
+  }
+  if ((reinterpret_cast<uintptr_t>(src) & 3u) != 0) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      Log.warn("GX_ARRAY_WORDSWAPPED_BE array at {} is not 4-byte aligned; uploading untransformed",
+               static_cast<const void*>(src));
+    }
+    return gfx::push_storage(src, array.size);
+  }
+  // Command processing is serialized, but this can run either on the FIFO worker
+  // thread or inline from fifo::drain(), so keep the scratch buffer thread-local.
+  static thread_local std::vector<uint8_t> scratch;
+  scratch.resize(array.size);
+  const u32 wholeWords = array.size & ~3u;
+  for (u32 i = 0; i < wholeWords; i += 4) {
+    scratch[i + 0] = src[i + 3];
+    scratch[i + 1] = src[i + 2];
+    scratch[i + 2] = src[i + 1];
+    scratch[i + 3] = src[i + 0];
+  }
+  // A trailing partial word cannot be un-swapped (its missing bytes were swapped
+  // out of range); copy it through so behaviour matches the untransformed path.
+  for (u32 i = wholeWords; i < array.size; ++i) {
+    scratch[i] = src[i];
+  }
+  return gfx::push_storage(scratch.data(), scratch.size());
+}
+
 static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Range vertRange, gfx::Range idxRange,
                          u32 numIndices) noexcept {
   auto& state = g_gxState;
@@ -348,7 +559,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     }
     auto& array = state.arrays[i];
     if (array.cachedRange.size == 0) {
-      array.cachedRange = gfx::push_storage(static_cast<const uint8_t*>(array.data), array.size);
+      array.cachedRange = push_array_storage(array);
     }
     immediates.arrayStart[i - GX_VA_POS] = array.cachedRange.offset;
   }
@@ -441,6 +652,15 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, Reader& read
     LIKELY { vtxSize = g_gxState.lastVtxSize; }
   else
     UNLIKELY { vtxSize = calc_vtx_size(fmt); }
+
+  /* TEMPORARY diagnostic (2026-08-11): annotate this draw's ring-buffer entry
+   * with the counts that determine how many bytes it consumes -- the usual
+   * cause of a desync detected further downstream. */
+  if (sMeleeCmdTraceCount > 0) {
+    auto& e = sMeleeCmdTrace[(sMeleeCmdTraceCount - 1) % MeleeCmdTraceCap];
+    e.extra = vtxCount;
+    e.extra2 = static_cast<u16>(vtxSize);
+  }
 
   u32 totalVtxBytes = vtxCount * vtxSize;
   if (totalVtxBytes > reader.remaining())
@@ -540,11 +760,19 @@ void handle_aurora(Reader& reader) noexcept {
     const u32 attrIdx = subCmd - GX_AURORA_LOAD_ARRAYBASE + GX_VA_POS;
     const u64 arrayAddr = reader.read<u64>();
     const u32 arraySize = reader.read<u32>();
-    const bool le = reader.read<u8>() == 1;
+    const u8 byteOrder = reader.read<u8>();
+    // GX_ARRAY_WORDSWAPPED_BE is un-done CPU-side on the uploaded copy, so as far as
+    // the shader is concerned the data is plain big-endian.
+    const bool le = byteOrder == GX_ARRAY_LE;
+    const bool wordSwapped = byteOrder == GX_ARRAY_WORDSWAPPED_BE;
 
     auto& array = g_gxState.arrays[attrIdx];
     const auto newData = reinterpret_cast<void*>(arrayAddr);
-    if (array.data != newData || array.size != arraySize || array.le != le) {
+    if (attrIdx >= GX_POS_MTX_ARRAY) {
+      Log.error("melee-pc: GXSetArray attrIdx={} data={:#x} size={} byteOrder={}", attrIdx, arrayAddr, arraySize,
+                byteOrder);
+    }
+    if (array.data != newData || array.size != arraySize || array.le != le || array.wordSwapped != wordSwapped) {
       if (array.le != le) {
         // Endianness is baked into the shader
         g_gxState.dirty |= DirtyPipeline;
@@ -552,6 +780,7 @@ void handle_aurora(Reader& reader) noexcept {
       array.data = newData;
       array.size = arraySize;
       array.le = le;
+      array.wordSwapped = wordSwapped;
       array.cachedRange = {};
       g_gxState.dirty |= DirtyImmediates;
     }

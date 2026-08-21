@@ -39,9 +39,19 @@ typedef unsigned int usize_t;
  * EFALT_VA_ARG macro. MSL's va_list on the PPC/MWCC ABI is just a raw
  * pointer, manually advanced; the real host va_list (e.g. x86_64 SysV)
  * is an opaque multi-field struct that can't be safely walked the same
- * way -- this hasn't been bridged yet (see pc_port.md). Compiles, but
- * traps loudly if actually reached at runtime rather than risk quietly
- * reading garbage into particle-effect parameters. */
+ * way. This stub compiled but trapped loudly if reached, rather than
+ * risk quietly reading garbage into particle-effect parameters.
+ *
+ * NO LONGER REACHED (2026-08-15). efalt.c's EFALT_VA_ARG is redirected
+ * to `__builtin_va_arg` by a melee_patch_source in CMakeLists.txt: that
+ * TU's `va_list` already resolves to the host's own __builtin_va_list
+ * (MSL/stdarg.h is not in its include tree, nor in efsync.c's, which is
+ * what calls it), so nothing had to be bridged -- only the macro
+ * re-pointed at the real host mechanism instead of at this stub. The
+ * stub stays: MSL/stdarg.h still declares __va_arg, and anything that
+ * starts using it should keep failing loudly rather than silently. See
+ * pc_port.md entry (96) fix 8, which supersedes item 9's "not bridged
+ * yet". */
 #define _var_arg_typeof(e) 0
 static inline void* __va_arg(void* list, unsigned char type) {
     (void) list;

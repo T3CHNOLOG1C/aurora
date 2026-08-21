@@ -1,7 +1,9 @@
 #include <dolphin/os.h>
+#include <dolphin/os_alloc_real.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 #include "../../logging.hpp"
 
@@ -338,7 +340,23 @@ void OSAddToHeap(OSHeapHandle heap, void* start, void* end) {
   hd.size += cell->size;
 }
 
-void* OSAllocFromHeap(OSHeapHandle heap, u32 size) {
+// melee-pc: renamed from `OSAllocFromHeap` (see `OSFreeToHeap` below too) --
+// this heap has no internal locking, matching real hardware's single-core
+// assumption. Decomp code that calls it is not itself wrapped in
+// OSDisableInterrupts (general memory allocation was never "DMA-adjacent"
+// on real hardware), but on this host it can race with a DVD
+// read-completion callback -- also decomp code, also capable of
+// allocating -- running concurrently on Aurora's DvdWorker thread,
+// corrupting this free-list allocator's linked structures mid-mutation.
+// melee-pc's src/os_alloc_compat.c provides the public names and
+// serializes all heap access through the same interrupt mutex
+// dvd_compat.c already uses for DVD callbacks. See
+// dolphin/os_alloc_real.h and pc_port.md for the trace that found this
+// (a spurious "out of memory" failure with 46MB genuinely free, but only
+// reproducible at full native speed -- never under gdb, which freezes
+// other threads during breakpoint stops and inferior calls, incidentally
+// serializing the race away).
+void* Aurora_OSAllocFromHeap_Real(OSHeapHandle heap, u32 size) {
   if (!validHeapHandle(heap) || size == 0) {
     return nullptr;
   }
@@ -379,7 +397,7 @@ void* OSAllocFromHeap(OSHeapHandle heap, u32 size) {
   return reinterpret_cast<u8*>(cell) + kHeaderSize;
 }
 
-void OSFreeToHeap(OSHeapHandle heap, void* ptr) {
+void Aurora_OSFreeToHeap_Real(OSHeapHandle heap, void* ptr) {
   if (!validHeapHandle(heap) || ptr == nullptr) {
     return;
   }
@@ -542,6 +560,40 @@ void OSDumpHeap(OSHeapHandle heap) {
                   reinterpret_cast<void*>(cell->prev),
                   reinterpret_cast<void*>(cell->next));
   }
+}
+
+void Aurora_OSGetArenaBounds(void** start, void** end) {
+  if (start != nullptr) {
+    *start = sArenaStart;
+  }
+  if (end != nullptr) {
+    *end = sArenaEnd;
+  }
+}
+
+void Aurora_OSDumpHeapRaw(OSHeapHandle heap) {
+  std::fprintf(stderr, "HEAPRAW heap=%d arena=[%p,%p) sHeapArray=%p sNumHeaps=%d\n", heap,
+               static_cast<void*>(sArenaStart), static_cast<void*>(sArenaEnd),
+               static_cast<void*>(sHeapArray), sNumHeaps);
+  if (!validHeapHandle(heap)) {
+    std::fprintf(stderr, "HEAPRAW invalid handle\n");
+    return;
+  }
+  auto& hd = sHeapArray[heap];
+  std::fprintf(stderr, "HEAPRAW size=%d freeList=%p allocated=%p\n", hd.size,
+               static_cast<void*>(hd.freeList), static_cast<void*>(hd.allocated));
+  int n = 0;
+  for (Cell* cell = hd.freeList; cell != nullptr && n < 4096; cell = cell->next, ++n) {
+    std::fprintf(stderr, "HEAPRAW free[%d] %p size=%d(0x%x) prev=%p next=%p owner=%p\n", n,
+                 static_cast<void*>(cell), cell->size, static_cast<unsigned>(cell->size),
+                 static_cast<void*>(cell->prev), static_cast<void*>(cell->next),
+                 static_cast<void*>(cell->owner));
+    if (!inArena(cell)) {
+      std::fprintf(stderr, "HEAPRAW free[%d] OUT OF ARENA, stopping\n", n);
+      break;
+    }
+  }
+  std::fflush(stderr);
 }
 
 void OSVisitAllocated(void (*visitor)(void*, u32)) {

@@ -1,6 +1,9 @@
 #include "dolphin/card.h"
 
+#include <cstdlib>
 #include <filesystem>
+#include <string>
+#include <unistd.h>
 
 #include "../internal.hpp"
 #include "dolphin/types.h"
@@ -10,6 +13,14 @@
 #include "../logging.hpp"
 #include "../card/CardGciFolder.hpp"
 #include "../fs_helper.hpp"
+
+#include <melee_card_compat.h>
+
+/* melee_pc_harness.h isn't included directly: it pulls in decomp's
+ * platform.h, which isn't on this library's include path. Just the one
+ * function needed here, matching melee_main.c's own precedent for a
+ * narrow local declaration instead of a cross-tree header. */
+extern "C" int melee_pc_harness_no_card(void);
 
 namespace {
 aurora::Module Log("aurora::card");
@@ -174,10 +185,45 @@ void CARDInit(const char* game, const char* maker) {
   }
 
   std::filesystem::path cardWorkingDir;
-  if (aurora::g_config.userPath != nullptr)
+  // melee-pc: --nosave gives this process its own private, isolated card
+  // directory (under the OS temp dir, keyed by PID) instead of the shared
+  // default location. Parallel test instances then each get a real,
+  // normally-formatted card of their own rather than racing on the same
+  // file -- unlike actually simulating "no card present" (tried first),
+  // which triggers a real "no memory card, continue anyway?" prompt that
+  // blocks unattended boot, exactly the problem this flag exists to avoid.
+  // A launch argument rather than an env var on purpose
+  // (melee_pc_harness.h): an env var left set would silently affect every
+  // future launch until explicitly unset.
+  if (melee_pc_harness_no_card()) {
+    cardWorkingDir = std::filesystem::temp_directory_path() /
+                      ("melee-pc-card-" + std::to_string(getpid()));
+    std::error_code ec;
+    std::filesystem::create_directories(cardWorkingDir, ec);
+    // A brand-new, never-used card is a *legitimate* first-boot state on
+    // retail too (no save file yet) -- it prompts same as a genuinely
+    // missing card, just blocking boot either way. Seed this isolated
+    // directory from the real default card (read-only copy) so this
+    // process gets its own private copy of an *already-initialized* card
+    // instead of a blank one, matching a normal subsequent boot with no
+    // prompt at all.
+    std::filesystem::path defaultDir = aurora::g_config.userPath != nullptr
+        ? std::filesystem::path(reinterpret_cast<const char8_t*>(aurora::g_config.userPath))
+        : std::filesystem::current_path();
+    std::filesystem::path defaultCard = GetCardFullPath(defaultDir, aurora::card::ECardSlot::SlotA);
+    std::filesystem::path isolatedCard = GetCardFullPath(cardWorkingDir, aurora::card::ECardSlot::SlotA);
+    if (std::filesystem::exists(defaultCard, ec)) {
+      std::filesystem::create_directories(isolatedCard.parent_path(), ec);
+      std::filesystem::copy(defaultCard, isolatedCard,
+                             std::filesystem::copy_options::recursive |
+                                 std::filesystem::copy_options::overwrite_existing,
+                             ec);
+    }
+  } else if (aurora::g_config.userPath != nullptr) {
     cardWorkingDir = reinterpret_cast<const char8_t*>(aurora::g_config.userPath);
-  else
+  } else {
     cardWorkingDir = std::filesystem::current_path();
+  }
 
   bool loadedCard = false;
 
@@ -248,7 +294,7 @@ s32 CARDCheckAsync(const s32 chan, const CARDCallback callback) {
 
   const auto& card = GET_CARD(chan);
   const auto res = static_cast<s32>(card->getError());
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return static_cast<s32>(card->getError());
 }
 
@@ -270,7 +316,7 @@ s32 CARDCheckExAsync(const s32 chan, s32* xferBytes [[maybe_unused]], const CARD
   }
   const auto& card = GET_CARD(chan);
   const auto res = static_cast<s32>(card->getError());
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return static_cast<s32>(card->getError());
 }
 
@@ -299,7 +345,7 @@ s32 CARDCreateAsync(const s32 chan, const char* fileName, const u32 size, CARDFi
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto res = CARDCreate(chan, fileName, size, fileInfo);
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return res;
 }
 
@@ -327,7 +373,7 @@ s32 CARDDeleteAsync(const s32 chan, const char* fileName, const CARDCallback cal
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto res = CARDDelete(chan, fileName);
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return res;
 }
 
@@ -354,7 +400,7 @@ s32 CARDFastDeleteAsync(const s32 chan, const s32 fileNo, const CARDCallback cal
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto res = CARDFastDelete(chan, fileNo);
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return res;
 }
 
@@ -395,7 +441,7 @@ s32 CARDFormatAsync(const s32 chan, const CARDCallback callback) {
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto res = CARDFormat(chan);
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return res;
 }
 
@@ -494,10 +540,16 @@ s32 CARDGetStatus(const s32 chan, s32 fileNo, CARDStat* stat) {
 
   aurora::card::CardStat kabuStat;
   const auto res = card->getStatus(fileNo, kabuStat);
-  if (res == aurora::card::ECardResult::READY)
+  if (res == aurora::card::ECardResult::READY) {
     CopyKabuStatsToDolphin(kabuStat, stat);
-  else
+  } else if (res == aurora::card::ECardResult::NOFILE) {
+    // Callers (e.g. melee's save-file directory scan in lbcardnew.c) probe every
+    // slot on the card looking for files; an empty slot returning NOFILE is the
+    // expected, common case, not a failure worth an error log.
+    Log.debug("No file at idx: {}", fileNo);
+  } else {
     Log.error("Failed to get status of file at idx: {}", fileNo);
+  }
 
   return static_cast<s32>(res);
 }
@@ -521,9 +573,18 @@ s32 CARDMount(const s32 chan, void* workArea [[maybe_unused]], CARDCallback deta
   return CARD_RESULT_READY;
 }
 s32 CARDMountAsync(const s32 chan, void* workArea [[maybe_unused]], const CARDCallback detachCallback [[maybe_unused]],
-                   const CARDCallback attachCallback [[maybe_unused]]) {
+                   const CARDCallback attachCallback) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
+  }
+  // Real hardware's attachCallback fires once mounting completes; decomp
+  // callers (e.g. melee/lb/lbcardnew.c's lb_8001A184) submit-then-mark-busy
+  // around this call and rely on the callback firing later to clear that
+  // busy state (see src/card_compat.c). This stub previously never called
+  // it at all, so that busy flag was set and never cleared -- the caller's
+  // poll loop (`do { } while (lb_8001B6F8() == 0xB)`) spun forever.
+  if (attachCallback != nullptr) {
+    melee_card_enqueue_callback(attachCallback, chan, CARD_RESULT_READY);
   }
   return CARD_RESULT_READY;
 }
@@ -586,17 +647,23 @@ s32 CARDRenameAsync(const s32 chan, const char* oldName, const char* newName, co
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto res = CARDRename(chan, oldName, newName);
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return res;
 }
 
 s32 CARDSetAttributesAsync(const s32 chan, s32 fileNo [[maybe_unused]], u8 attr [[maybe_unused]],
-                           CARDCallback callback [[maybe_unused]]) {
+                           CARDCallback callback) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
   // TODO:
   CARD_STUB
+  // See CARDMountAsync above / src/card_compat.c: decomp callers wait on
+  // this callback firing to clear a busy flag they set right after this
+  // call returns -- a stub that never calls it hangs them forever.
+  if (callback != nullptr) {
+    melee_card_enqueue_callback(callback, chan, CARD_RESULT_READY);
+  }
   return CARD_RESULT_READY;
 }
 
@@ -643,7 +710,7 @@ s32 CARDSetStatusAsync(const s32 chan, const s32 fileNo, const CARDStat* stat, c
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto res = CARDSetStatus(chan, fileNo, stat);
-  callback(chan, res);
+  melee_card_enqueue_callback(callback, chan, res);
   return res;
 }
 
@@ -707,7 +774,9 @@ s32 CARDRead(const CARDFileInfo* fileInfo, void* addr, s32 length, const s32 off
 s32 CARDReadAsync(const CARDFileInfo* fileInfo, void* addr, const s32 length, const s32 offset,
                   const CARDCallback callback) {
   const auto res = CARDRead(fileInfo, addr, length, offset);
-  callback(fileInfo->chan, res);
+  if (callback != nullptr) {
+    melee_card_enqueue_callback(callback, fileInfo->chan, res);
+  }
   return res;
 }
 
@@ -736,7 +805,9 @@ s32 CARDWrite(const CARDFileInfo* fileInfo, const void* addr, const s32 length, 
 s32 CARDWriteAsync(const CARDFileInfo* fileInfo, const void* addr, const s32 length, const s32 offset,
                    const CARDCallback callback) {
   const auto res = CARDWrite(fileInfo, addr, length, offset);
-  callback(fileInfo->chan, res);
+  if (callback != nullptr) {
+    melee_card_enqueue_callback(callback, fileInfo->chan, res);
+  }
   return res;
 }
 }

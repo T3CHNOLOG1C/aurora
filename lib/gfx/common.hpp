@@ -153,6 +153,15 @@ private:
       m_owned = true;
     } else if (size > m_capacity) {
       if (!m_owned) {
+        /* melee-pc: a non-owned ByteBuffer is a window into the mapped
+         * staging buffer, so it cannot grow -- but aborting with no
+         * information makes a frame-budget overrun indistinguishable from a
+         * garbage vertex count. Say which. */
+        std::fprintf(stderr,
+                     "PROGDBG_GFXBUF overflow: need %zu, capacity %zu, "
+                     "current length %zu\n",
+                     size, m_capacity, m_length);
+        std::fflush(stderr);
         abort();
       }
       // Exponential expansion to avoid O(n^2) time complexity.
@@ -176,7 +185,42 @@ inline constexpr bool UseTextureBuffer = true;
 inline constexpr uint64_t UniformBufferSize = 25165824;  // 24mb
 inline constexpr uint64_t VertexBufferSize = 5242880;    // 5mb
 inline constexpr uint64_t IndexBufferSize = 2097152;     // 2mb
-inline constexpr uint64_t StorageBufferSize = 8388608;   // 8mb
+/* Bumped from 8mb (2026-08-12): a real VS-mode scene (character select
+ * advancing into stage select -- see pc_port.md entry (64)) fills this
+ * to exactly 8388608/8388608 bytes and the very next push_storage() call
+ * of the frame aborts (ByteBuffer::resize()'s bare `abort()` for a
+ * non-owned/fixed-capacity buffer, no log message -- confirmed live
+ * under gdb: length==capacity==0x800000 at the moment of the failed
+ * push). Not a runaway/leak -- this is a real, finite per-frame amount
+ * that just needs more headroom than 8mb for a model-heavy scene;
+ * doubled for comfortable slack rather than tuning to the exact
+ * observed frame's requirement.
+ *
+ * Bumped again from 16mb (2026-08-13, pc_port.md entry (83)): the same
+ * abort, same call stack (push_storage -> ByteBuffer::resize's bare
+ * abort()), now hit rendering an actual in-match fighter frame for the
+ * first time all session (HSD_JObjDispAll -> ... -> push_gx_draw ->
+ * push_storage) -- a real fighter+stage scene needs more per-frame
+ * storage than character-select alone did. Doubled again for the same
+ * reason as before: this is a real, finite per-frame requirement, not a
+ * leak, and headroom is cheap relative to one abort per frame that fills
+ * it. */
+/* melee-pc: raised from 32mb. A four-fighter match on Peach's Castle
+ * genuinely needs slightly more than 32mb of vertex storage in a single
+ * frame -- measured at 33816576 bytes against the old 33554432 cap, i.e.
+ * a real budget overrun rather than a runaway draw. The frame packet's
+ * storage ByteBuffer is a non-owned window into the mapped staging
+ * buffer, so overflowing it can only abort(); see the PROGDBG_GFXBUF
+ * message in ByteBuffer::resize below, which is what measured this. */
+/* melee-pc: raised from 48mb (2026-08-17, Track B stage sweep). Mute
+ * City's track/city geometry needs slightly more than 48mb in a single
+ * frame -- measured at 50593792 bytes against the old 50331648 cap (an
+ * overrun of just 262144 bytes), same call stack as every bump above
+ * (push_gx_draw -> push_storage -> ByteBuffer::resize's bare abort()).
+ * Same reasoning as every prior bump: a real, finite per-frame
+ * requirement, not a leak -- headroom is cheap relative to one abort
+ * per frame that fills it. */
+inline constexpr uint64_t StorageBufferSize = 67108864;  // 64mb
 inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
 
 extern AuroraStats g_stats;

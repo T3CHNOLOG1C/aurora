@@ -2,7 +2,10 @@
 #include "__gx.h"
 
 #include "../../gx/fifo.hpp"
+#include "../../gx/command_processor.hpp"
 
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 static __GXData_struct sSavedGXData;
@@ -56,6 +59,27 @@ void GXCallDisplayList(const void* data, u32 nbytes) {
   if (*reinterpret_cast<u32*>(&__gx->vNum) != 0) {
     __GXSendFlushPrim();
   }
+
+  /* TEMPORARY diagnostic (2026-08-11): record where each display list lands in
+   * the FIFO, so an "unknown opcode at pos N" desync can be mapped back to the
+   * display list (and therefore the caller/archive) that produced those bytes.
+   * MELEE_PC_TRACE_DL=<count>. */
+  {
+    static int budget = -1;
+    static int count = 0;
+    if (budget < 0) {
+      const char* env = std::getenv("MELEE_PC_TRACE_DL");
+      budget = env != nullptr ? std::atoi(env) : 0;
+    }
+    if (count < budget) {
+      ++count;
+      std::fprintf(stderr, "PROGDBG CallDL #%d fifoPos=%u nbytes=%u data=%p\n", count,
+                   aurora::gx::fifo::get_buffer_size(), nbytes, data);
+    }
+  }
+  /* Always recorded (two stores), so a desync can be diffed against its source
+   * display list even on a run with no tracing enabled. */
+  aurora::gx::fifo::note_display_list(aurora::gx::fifo::get_buffer_size(), nbytes, data);
 
   // Write display list contents to the FIFO
   aurora::gx::fifo::write_data(data, nbytes);

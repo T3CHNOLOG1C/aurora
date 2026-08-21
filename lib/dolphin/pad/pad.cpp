@@ -9,6 +9,7 @@
 #include <array>
 #include <sys/stat.h>
 #include <ranges>
+#include <vector>
 
 namespace {
 constexpr int32_t k_mappingsFileVersion = 4;
@@ -407,6 +408,33 @@ aurora::input::GameController* __PADGetControllerForIndex(const u32 idx) /*  NOL
 }
 
 u32 PADCount() { return aurora::input::g_GameControllers.size(); }
+
+u32 PADRescanControllers() {
+  /* Drop map entries whose SDL device has gone away (normally handled by
+   * SDL_EVENT_GAMEPAD_REMOVED, but a rescan shouldn't trust that every
+   * event was seen). Collect first: remove_controller mutates the map. */
+  std::vector<Uint32> stale;
+  for (const auto& [instance, controller] : aurora::input::g_GameControllers) {
+    if (!SDL_GamepadConnected(controller.m_controller)) {
+      stale.push_back(instance);
+    }
+  }
+  for (const Uint32 instance : stale) {
+    aurora::input::remove_controller(instance);
+  }
+
+  u32 added = 0;
+  int count = 0;
+  if (SDL_JoystickID* ids = SDL_GetGamepads(&count); ids != nullptr) {
+    for (int i = 0; i < count; ++i) {
+      if (!aurora::input::g_GameControllers.contains(ids[i]) && aurora::input::add_controller(ids[i]) != -1) {
+        ++added;
+      }
+    }
+    SDL_free(ids);
+  }
+  return added;
+}
 
 const char* PADGetNameForControllerIndex(const u32 idx) {
   const auto* ctrl = __PADGetControllerForIndex(idx);

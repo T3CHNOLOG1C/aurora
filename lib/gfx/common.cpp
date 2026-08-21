@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <deque>
 #include <mutex>
 #include <optional>
@@ -1635,6 +1636,15 @@ bool begin_frame() {
   pass.label = pass_label("EFB");
   set_efb_targets(pass);
   pass.clearColorValue = gx::g_gxState.clearColor;
+  /* TEMPORARY diagnostic (2026-08-11): override the EFB clear colour so a
+   * frame readback can distinguish "nothing was rasterised at all" from
+   * "geometry was rasterised but came out black". MELEE_PC_CLEAR_MAGENTA. */
+  {
+    static const bool clearMagenta = std::getenv("MELEE_PC_CLEAR_MAGENTA") != nullptr;
+    if (clearMagenta) {
+      pass.clearColorValue = Vec4<float>{1.f, 0.f, 1.f, 1.f};
+    }
+  }
   pass.clearDepthValue = gx::clear_depth_value();
   g_currentRenderPass = 0;
   // Refresh render viewport/scissor from logical in case FB size changed

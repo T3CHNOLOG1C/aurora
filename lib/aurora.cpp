@@ -28,6 +28,13 @@
 #include "system_info.hpp"
 #include "tracy/Tracy.hpp"
 
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <vector>
+
 namespace aurora {
 AuroraConfig g_config;
 uint32_t g_sdlCustomEventsStart;
@@ -92,6 +99,169 @@ constexpr std::array<AuroraBackend, 0> PreferredBackendOrder{};
 #endif
 
 bool g_initialFrame = false;
+
+#ifdef AURORA_ENABLE_GX
+/* TEMPORARY diagnostic (2026-08-11), black-screen-before-first-input
+ * investigation: dump the *present source* (the texture that gets blitted
+ * into the swapchain each frame) to a PPM file on selected frames. This
+ * reads back only melee-pc's own render target -- it is not a screen
+ * capture of any kind and cannot contain anything but this process's own
+ * rendering. Gated behind MELEE_PC_DUMP_FRAMES="12,60,300" (comma-separated
+ * frame indices) + MELEE_PC_DUMP_DIR. Remove once the question is answered. */
+uint64_t g_frameIndex = 0;
+
+struct FrameDump {
+  wgpu::Buffer buffer;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t bytesPerRow = 0;
+  wgpu::TextureFormat format = wgpu::TextureFormat::Undefined;
+  uint64_t frame = 0;
+};
+
+bool dump_wanted(uint64_t frame) {
+  static bool parsed = false;
+  static std::vector<uint64_t> frames;
+  static uint64_t every = 0;
+  if (!parsed) {
+    parsed = true;
+    const char* everyEnv = std::getenv("MELEE_PC_DUMP_EVERY");
+    if (everyEnv != nullptr) {
+      every = std::strtoull(everyEnv, nullptr, 10);
+    }
+    const char* env = std::getenv("MELEE_PC_DUMP_FRAMES");
+    if (env != nullptr) {
+      const std::string s{env};
+      size_t pos = 0;
+      while (pos < s.size()) {
+        size_t next = s.find(',', pos);
+        if (next == std::string::npos) {
+          next = s.size();
+        }
+        if (next > pos) {
+          frames.push_back(std::strtoull(s.substr(pos, next - pos).c_str(), nullptr, 10));
+        }
+        pos = next + 1;
+      }
+    }
+  }
+  if (every != 0 && frame % every == 0) {
+    return true;
+  }
+  return std::find(frames.begin(), frames.end(), frame) != frames.end();
+}
+
+std::optional<FrameDump> record_frame_dump(const wgpu::CommandEncoder& encoder, uint64_t frame) {
+  if (!dump_wanted(frame)) {
+    return std::nullopt;
+  }
+  const auto& src = webgpu::present_source();
+  if (!src.texture || src.size.width == 0 || src.size.height == 0) {
+    return std::nullopt;
+  }
+  const uint32_t bytesPerRow = AURORA_ALIGN(src.size.width * 4u, 256u);
+  const wgpu::BufferDescriptor bufferDescriptor{
+      .label = "Frame dump readback",
+      .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
+      .size = static_cast<uint64_t>(bytesPerRow) * src.size.height,
+  };
+  auto buffer = webgpu::g_device.CreateBuffer(&bufferDescriptor);
+  if (!buffer) {
+    return std::nullopt;
+  }
+  const wgpu::TexelCopyTextureInfo copySrc{
+      .texture = src.texture,
+      .mipLevel = 0,
+      .origin = {0, 0, 0},
+      .aspect = wgpu::TextureAspect::All,
+  };
+  const wgpu::TexelCopyBufferInfo copyDst{
+      .layout =
+          wgpu::TexelCopyBufferLayout{
+              .offset = 0,
+              .bytesPerRow = bytesPerRow,
+              .rowsPerImage = src.size.height,
+          },
+      .buffer = buffer,
+  };
+  const wgpu::Extent3D extent{src.size.width, src.size.height, 1};
+  encoder.CopyTextureToBuffer(&copySrc, &copyDst, &extent);
+  return FrameDump{
+      .buffer = std::move(buffer),
+      .width = src.size.width,
+      .height = src.size.height,
+      .bytesPerRow = bytesPerRow,
+      .format = src.format,
+      .frame = frame,
+  };
+}
+
+void write_frame_dump(const FrameDump& dump) {
+  bool mapped = false;
+  const auto future = dump.buffer.MapAsync(wgpu::MapMode::Read, 0, wgpu::kWholeMapSize,
+                                           wgpu::CallbackMode::WaitAnyOnly,
+                                           [&](wgpu::MapAsyncStatus status, wgpu::StringView message) {
+                                             mapped = status == wgpu::MapAsyncStatus::Success;
+                                             if (!mapped) {
+                                               Log.error("Frame dump map failed: {}", message);
+                                             }
+                                           });
+  if (webgpu::g_instance.WaitAny(future, 5000000000) != wgpu::WaitStatus::Success || !mapped) {
+    Log.error("Frame dump wait failed");
+    return;
+  }
+  const auto* bytes = static_cast<const uint8_t*>(
+      dump.buffer.GetConstMappedRange(0, static_cast<size_t>(dump.bytesPerRow) * dump.height));
+  if (bytes == nullptr) {
+    Log.error("Frame dump mapped range null");
+    return;
+  }
+  const char* dir = std::getenv("MELEE_PC_DUMP_DIR");
+  if (dir == nullptr) {
+    dir = "/tmp";
+  }
+  const bool bgra = dump.format == wgpu::TextureFormat::BGRA8Unorm ||
+                    dump.format == wgpu::TextureFormat::BGRA8UnormSrgb;
+  uint64_t nonBlack = 0;
+  std::vector<uint8_t> rgb(static_cast<size_t>(dump.width) * dump.height * 3);
+  for (uint32_t y = 0; y < dump.height; ++y) {
+    const uint8_t* srcRow = bytes + static_cast<size_t>(y) * dump.bytesPerRow;
+    uint8_t* dstRow = rgb.data() + static_cast<size_t>(y) * dump.width * 3;
+    for (uint32_t x = 0; x < dump.width; ++x) {
+      const uint8_t b0 = srcRow[x * 4 + 0];
+      const uint8_t b1 = srcRow[x * 4 + 1];
+      const uint8_t b2 = srcRow[x * 4 + 2];
+      const uint8_t r = bgra ? b2 : b0;
+      const uint8_t g = b1;
+      const uint8_t b = bgra ? b0 : b2;
+      dstRow[x * 3 + 0] = r;
+      dstRow[x * 3 + 1] = g;
+      dstRow[x * 3 + 2] = b;
+      if (r != 0 || g != 0 || b != 0) {
+        ++nonBlack;
+      }
+    }
+  }
+  dump.buffer.Unmap();
+  char path[512];
+  std::snprintf(path, sizeof(path), "%s/melee_frame_%06llu.ppm", dir,
+                static_cast<unsigned long long>(dump.frame));
+  const bool writeFile = nonBlack != 0 || std::getenv("MELEE_PC_DUMP_ALWAYS") != nullptr;
+  if (writeFile) {
+    FILE* f = std::fopen(path, "wb");
+    if (f == nullptr) {
+      Log.error("Frame dump fopen failed for {}", path);
+      return;
+    }
+    std::fprintf(f, "P6\n%u %u\n255\n", dump.width, dump.height);
+    std::fwrite(rgb.data(), 1, rgb.size(), f);
+    std::fclose(f);
+  }
+  std::fprintf(stderr, "PROGDBG FRAMEDUMP frame=%llu %ux%u format=%u nonBlackPixels=%llu -> %s\n",
+               static_cast<unsigned long long>(dump.frame), dump.width, dump.height,
+               static_cast<uint32_t>(dump.format), static_cast<unsigned long long>(nonBlack), path);
+}
+#endif
 
 AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexcept {
   g_config = config;
@@ -282,7 +452,8 @@ void end_frame() noexcept {
   }
 #endif
 
-  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
+  const uint64_t dumpFrameIndex = g_frameIndex++;
+  gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport, dumpFrameIndex,
                   imguiDrawData = std::move(imguiDrawData)](
                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
     wgpu::Texture currentTexture;
@@ -363,12 +534,16 @@ void end_frame() noexcept {
     } else {
       Log.info("Skipping present; window not presentable");
     }
+    auto frameDump = record_frame_dump(encoder, dumpFrameIndex);
     webgpu::gpu_prof::frame_end(encoder);
     const wgpu::CommandBufferDescriptor cmdBufDescriptor{.label = "Redraw command buffer"};
     const auto buffer = encoder.Finish(&cmdBufDescriptor);
     {
       ZoneScopedN("Queue Submit");
       g_queue.Submit(1, &buffer);
+    }
+    if (frameDump) {
+      write_frame_dump(*frameDump);
     }
     webgpu::gpu_prof::after_submit();
     if (canPresent && g_surface) {

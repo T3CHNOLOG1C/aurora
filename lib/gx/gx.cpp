@@ -437,7 +437,17 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
       };
     }
   }
-  for (u8 i = 0; i < g_gxState.numTexGens; ++i) {
+  /* Copy every slot, not just `[0, numTexGens)`: g_gxState.tcgs mirrors the
+   * real XF texgen registers, which (like real hardware) hold whatever was
+   * last written regardless of the currently-declared active count.
+   * sampledTexCoords (shader_info.cpp) is derived independently from TEV
+   * stage texCoordId, so a stage can reference a slot >= numTexGens for
+   * this draw while that slot was legitimately configured by an earlier
+   * GXSetTexCoordGen(2) call -- gating this copy by numTexGens left such
+   * slots at shaderConfig's freshly-reset default (TcgConfig::src ==
+   * GX_MAX_TEXGENSRC), which shader.cpp's codegen treats as a hard error
+   * ("unhandled tcg src 21") instead of the real, previously-written value. */
+  for (u8 i = 0; i < MaxTexCoord; ++i) {
     config.shaderConfig.tcgs[i] = g_gxState.tcgs[i];
   }
   if (g_gxState.alphaCompare) {

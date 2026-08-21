@@ -2,6 +2,13 @@
 #include "__gx.h"
 #include "dolphin/mtx/GeoTypes.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <algorithm>
+#include <cmath>
+#include <execinfo.h>
+
 static inline void CacheProjectionVector(const f32* ptr, GXProjectionType type) {
   __gx->projType = type;
   for (int i = 0; i < 6; ++i) {
@@ -9,10 +16,98 @@ static inline void CacheProjectionVector(const f32* ptr, GXProjectionType type) 
   }
 }
 
+/* TEMPORARY diagnostic (2026-08-11): one-shot trace of the transform state
+ * feeding the vertex pipeline, for the "everything renders as huge distorted
+ * polygons" investigation. Gated behind MELEE_PC_TRACE_MTX=<count>. */
+static int melee_trace_mtx_budget() {
+  static int budget = -1;
+  if (budget < 0) {
+    const char* env = std::getenv("MELEE_PC_TRACE_MTX");
+    budget = env != nullptr ? std::atoi(env) : 0;
+  }
+  return budget;
+}
+static int melee_trace_proj_count = 0;
+static int melee_trace_pos_count = 0;
+
+/* TEMPORARY diagnostic (2026-08-14): "the stage and fighters never appear,
+ * only the (screen-space) HUD does" investigation. The per-call MTX trace
+ * above is useless for that question -- it burns its whole budget inside the
+ * first few frames of the boot logos, thousands of frames before the match.
+ * This one instead prints a line only when the combined
+ * viewport+projection state actually *changes*, so a whole run collapses to
+ * the handful of distinct camera setups the frame is built from (3D scene
+ * camera, HUD ortho camera, ...) no matter how long it runs.
+ * Gated behind MELEE_PC_TRACE_VP=1. */
+static int melee_trace_vp_level() {
+  static int level = -1;
+  if (level < 0) {
+    const char* env = std::getenv("MELEE_PC_TRACE_VP");
+    level = env != nullptr ? std::max(1, std::atoi(env)) : 0;
+  }
+  return level;
+}
+
+static bool melee_trace_vp_enabled() { return melee_trace_vp_level() > 0; }
+
+/* At level >= 2, a projection containing a non-finite value (an infinite
+ * cot(fov/2), i.e. a camera whose field of view came out as 0) also prints a
+ * native backtrace, which is the only practical way to find *which* of the
+ * several cameras composing a frame is the broken one -- gdb cannot usefully
+ * put a conditional breakpoint here on this optimized build. Budgeted so a
+ * per-frame bug does not produce a per-frame backtrace. */
+static void melee_trace_vp_backtrace() {
+  static int budget = 3;
+  if (melee_trace_vp_level() < 2 || budget <= 0) {
+    return;
+  }
+  --budget;
+  void* frames[32];
+  const int n = backtrace(frames, 32);
+  std::fprintf(stderr, "PROGDBG VP NONFINITE backtrace (%d frames):\n", n);
+  backtrace_symbols_fd(frames, n, fileno(stderr));
+}
+
+static void melee_trace_vp(GXProjectionType type, const f32* projVec) {
+  if (!melee_trace_vp_enabled()) {
+    return;
+  }
+  static f32 lastProj[7];
+  static f32 lastVp[6];
+  static bool primed = false;
+  const f32 vp[6] = {__gx->vpLeft, __gx->vpTop, __gx->vpWd, __gx->vpHt, __gx->vpNearz, __gx->vpFarz};
+  if (primed && std::memcmp(lastProj, projVec, sizeof(lastProj)) == 0 &&
+      std::memcmp(lastVp, vp, sizeof(lastVp)) == 0) {
+    return;
+  }
+  std::memcpy(lastProj, projVec, sizeof(lastProj));
+  std::memcpy(lastVp, vp, sizeof(lastVp));
+  primed = true;
+  std::fprintf(stderr,
+               "PROGDBG VP type=%d vp=[l=%g t=%g w=%g h=%g nz=%g fz=%g] "
+               "proj=[%g %g %g %g %g %g]\n",
+               static_cast<int>(type), vp[0], vp[1], vp[2], vp[3], vp[4], vp[5], projVec[1], projVec[2],
+               projVec[3], projVec[4], projVec[5], projVec[6]);
+  for (int i = 1; i <= 6; ++i) {
+    if (!std::isfinite(projVec[i])) {
+      melee_trace_vp_backtrace();
+      break;
+    }
+  }
+}
+
 extern "C" {
 
 void GXSetProjection(const void* mtx_, GXProjectionType type) {
   const auto& mtx = *reinterpret_cast<const aurora::Mat4x4<float>*>(mtx_);
+  if (melee_trace_proj_count < melee_trace_mtx_budget()) {
+    ++melee_trace_proj_count;
+    std::fprintf(stderr,
+                 "PROGDBG PROJ type=%d [%g %g %g %g][%g %g %g %g][%g %g %g %g][%g %g %g %g]\n",
+                 static_cast<int>(type), mtx[0][0], mtx[0][1], mtx[0][2], mtx[0][3], mtx[1][0], mtx[1][1],
+                 mtx[1][2], mtx[1][3], mtx[2][0], mtx[2][1], mtx[2][2], mtx[2][3], mtx[3][0], mtx[3][1],
+                 mtx[3][2], mtx[3][3]);
+  }
   const f32 projVec[] = {
       static_cast<f32>(type == GX_ORTHOGRAPHIC),
       mtx[0][0],
@@ -23,6 +118,7 @@ void GXSetProjection(const void* mtx_, GXProjectionType type) {
       mtx[2][3],
   };
   CacheProjectionVector(projVec, type);
+  melee_trace_vp(type, projVec);
 
   // XF bulk write: 6 params + projection type at 0x1020-0x1026
   GX_WRITE_U8(0x10);
@@ -42,6 +138,7 @@ void GXSetProjectionv(const f32* ptr) {
 
   const GXProjectionType type = ptr[0] == 0.0f ? GX_PERSPECTIVE : GX_ORTHOGRAPHIC;
   CacheProjectionVector(ptr, type);
+  melee_trace_vp(type, ptr);
 
   // XF bulk write: 6 params + projection type at 0x1020-0x1026
   GX_WRITE_U8(0x10);
@@ -56,6 +153,11 @@ void GXSetProjectionv(const f32* ptr) {
 void GXLoadPosMtxImm(const void* mtx_, u32 id) {
   CHECK(id >= GX_PNMTX0 && id <= GX_PNMTX9, "invalid pn mtx {}", static_cast<int>(id));
   const auto* mtx = reinterpret_cast<const f32*>(mtx_);
+  if (melee_trace_pos_count < melee_trace_mtx_budget()) {
+    ++melee_trace_pos_count;
+    std::fprintf(stderr, "PROGDBG POSMTX id=%u [%g %g %g %g][%g %g %g %g][%g %g %g %g]\n", id, mtx[0], mtx[1],
+                 mtx[2], mtx[3], mtx[4], mtx[5], mtx[6], mtx[7], mtx[8], mtx[9], mtx[10], mtx[11]);
+  }
 
   GX_WRITE_U8(0x10);
   GX_WRITE_U32((id * 4) | 0xB0000);

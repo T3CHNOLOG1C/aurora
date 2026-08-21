@@ -9,6 +9,9 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <utility>
 
@@ -72,6 +75,59 @@ TextureHandle new_static_texture_2d(uint32_t width, uint32_t height, uint32_t mi
     if (!converted.data.empty()) {
       data = converted.data;
       ref.hasArbitraryMips = converted.hasArbitraryMips;
+    }
+    /* melee-pc TEMPORARY diagnostic (2026-08-18, fighter-texture
+     * investigation): dump every decoded mip-0 as a PPM so the texture data
+     * Aurora actually samples can be inspected directly -- this is what
+     * separates "corruption baked into the archive bytes" from "corruption
+     * introduced later at material/TEV/lighting time".
+     * MELEE_PC_DUMP_TEX=1, output dir MELEE_PC_DUMP_TEX_DIR (default /tmp). */
+    if (tlut && !converted.data.empty() && std::getenv("MELEE_PC_DUMP_TEX") != nullptr) {
+      /* melee-pc diagnostic: dump the decoded palette as a 1-row PPM so a
+       * CI4/CI8 texture's colours can be inspected even though the texture
+       * itself uploads as bare indices. */
+      static uint32_t sTlutSeq = 0;
+      const char* dir = std::getenv("MELEE_PC_DUMP_TEX_DIR");
+      if (dir == nullptr) { dir = "/tmp"; }
+      const uint32_t n = ref.size.width;
+      if (n > 0 && converted.data.size() >= static_cast<size_t>(n) * 4) {
+        char path[768];
+        std::snprintf(path, sizeof(path), "%s/tlut_%05u_n%u_fmt%u.ppm", dir, sTlutSeq++, n, ref.gxFormat);
+        if (FILE* f = std::fopen(path, "wb")) {
+          std::fprintf(f, "P6\n%u 1\n255\n", n);
+          for (size_t i = 0; i < n; ++i) { std::fwrite(converted.data.data() + i * 4, 1, 3, f); }
+          std::fclose(f);
+        }
+      }
+    }
+    if (!tlut && !converted.data.empty() && std::getenv("MELEE_PC_DUMP_TEX") != nullptr) {
+      const uint32_t w = ref.size.width;
+      const uint32_t h = ref.size.height;
+      if (w > 0 && h > 0 && converted.data.size() >= static_cast<size_t>(w) * h * 4) {
+        static uint32_t sSeq = 0;
+        const char* dir = std::getenv("MELEE_PC_DUMP_TEX_DIR");
+        if (dir == nullptr) {
+          dir = "/tmp";
+        }
+        char path[768];
+        std::snprintf(path, sizeof(path), "%s/tex_%05u_%s_%ux%u_gx%02x.ppm", dir, sSeq++,
+                      label != nullptr ? label : "unnamed", w, h, ref.gxFormat);
+        for (char* p = path; *p != '\0'; ++p) {
+          if (*p == ' ' || *p == '/' ) {
+            if (p > path + std::strlen(dir)) {
+              *p = '_';
+            }
+          }
+        }
+        if (FILE* f = std::fopen(path, "wb")) {
+          std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+          const uint8_t* px = converted.data.data();
+          for (size_t i = 0; i < static_cast<size_t>(w) * h; ++i) {
+            std::fwrite(px + i * 4, 1, 3, f);
+          }
+          std::fclose(f);
+        }
+      }
     }
   }
 

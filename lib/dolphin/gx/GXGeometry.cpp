@@ -215,7 +215,7 @@ void GXSetVtxAttrFmtv(GXVtxFmt vtxfmt, const GXVtxAttrFmtList* list) {
   __gx->dirtyVAT |= static_cast<u8>(1 << vtxfmt);
 }
 
-void GXSetArray(GXAttr attr, const void* data, u32 size, u8 stride, bool le) {
+void GXSetArray(GXAttr attr, const void* data, u32 size, u8 stride, u8 byteOrder) {
   GXAttr cpAttr = static_cast<GXAttr>(attr);
   if (attr == GX_VA_NBT) {
     cpAttr = GX_VA_NRM;
@@ -228,7 +228,7 @@ void GXSetArray(GXAttr attr, const void* data, u32 size, u8 stride, bool le) {
   GX_WRITE_AURORA(GX_AURORA_LOAD_ARRAYBASE | cpIdx);
   GX_WRITE_U64(reinterpret_cast<u64>(data));
   GX_WRITE_U32(size);
-  GX_WRITE_U8(le ? 1 : 0);
+  GX_WRITE_U8(byteOrder);
 
   // Write array stride
   GX_WRITE_CP_REG(CP_REG_ARRAYSTRIDE_ID | cpIdx, stride);
