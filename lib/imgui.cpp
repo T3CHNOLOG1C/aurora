@@ -33,8 +33,16 @@ static std::vector<SDL_Texture*> g_sdlTextures;
 static std::vector<wgpu::Texture> g_wgpuTextures;
 
 struct DrawData::Impl {
+  struct DrawListDeleter {
+    void operator()(ImDrawList* drawList) const noexcept {
+      if (drawList != nullptr) {
+        IM_DELETE(drawList);
+      }
+    }
+  };
+
   ImDrawData drawData;
-  std::vector<std::unique_ptr<ImDrawList>> drawLists;
+  std::vector<std::unique_ptr<ImDrawList, DrawListDeleter>> drawLists;
 };
 
 void create_context() noexcept {

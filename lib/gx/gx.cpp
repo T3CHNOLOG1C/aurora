@@ -14,6 +14,7 @@
 #include <tracy/Tracy.hpp>
 
 #include <atomic>
+#include <algorithm>
 #include <bit>
 #include <cfloat>
 #include <cmath>
@@ -418,14 +419,21 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
     config.shaderConfig.lineMode = 0;
   }
   config.shaderConfig.tevSwapTable = g_gxState.tevSwapTable;
-  for (u8 i = 0; i < g_gxState.numTevStages; ++i) {
+  // These fields are bytes for convenient register mirroring, but the
+  // hardware-backed arrays are much smaller.  Use a wide loop counter: if a
+  // malformed display list leaves a byte at 0xff, a u8 counter wraps and
+  // traps the render thread in this loop forever (the main thread then waits
+  // forever for the next retrace).
+  const u32 tevStageCount = std::min<u32>(g_gxState.numTevStages, MaxTevStages);
+  for (u32 i = 0; i < tevStageCount; ++i) {
     config.shaderConfig.tevStages[i] = g_gxState.tevStages[i];
   }
-  config.shaderConfig.tevStageCount = g_gxState.numTevStages;
-  for (u8 i = 0; i < g_gxState.numIndStages; ++i) {
+  config.shaderConfig.tevStageCount = tevStageCount;
+  const u32 indStageCount = std::min<u32>(g_gxState.numIndStages, MaxIndStages);
+  for (u32 i = 0; i < indStageCount; ++i) {
     config.shaderConfig.indStages[i] = g_gxState.indStages[i];
   }
-  config.shaderConfig.numIndStages = g_gxState.numIndStages;
+  config.shaderConfig.numIndStages = indStageCount;
   for (u8 i = 0; i < MaxColorChannels; ++i) {
     const auto& cc = g_gxState.colorChannelConfig[i];
     if (cc.lightingEnabled) {

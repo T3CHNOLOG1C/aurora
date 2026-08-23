@@ -70,7 +70,7 @@
 #define PAD_SUBSTICK_DOWN (1 << 21)  // 0x200000
 #define PAD_SUBSTICK_LEFT (1 << 22)  // 0x400000
 #define PAD_SUBSTICK_RIGHT (1 << 23) // 0x800000
-#define PAD_TRIGGER_LR (1 << 31)     // 0x80000000
+#define PAD_TRIGGER_LR (1u << 31)     // 0x80000000
 #define PAD_CONFIRM (1ULL << 32)     // 0x100000000
 #define PAD_CANCEL (1ULL << 33)      // 0x200000000
 #define PAD_LR_START (1ULL << 34)    // 0x400000000

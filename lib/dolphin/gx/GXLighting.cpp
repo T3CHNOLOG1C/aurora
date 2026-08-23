@@ -9,6 +9,12 @@
 // retrace A and retrace B, so a clean window can be diffed against a dark one
 // from the same run. Remove once the fighter-darkening bug is rooted.
 extern "C" u32 VIGetRetraceCount(void);
+#if defined(__GNUC__)
+// The standalone Aurora smoketest does not link the game VI shim. Keep the
+// optional diagnostic usable there while allowing the game to provide its
+// real strong definition.
+extern "C" __attribute__((weak)) u32 VIGetRetraceCount(void) { return 0; }
+#endif
 static bool melee_pc_gxlog_active() {
   static long w1 = -1, w2 = -1;
   static bool parsed = false;

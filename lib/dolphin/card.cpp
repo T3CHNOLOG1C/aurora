@@ -594,6 +594,9 @@ s32 CARDOpen(const s32 chan, const char* fileName, CARDFileInfo* fileInfo) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
+  if (melee_pc_harness_no_card()) {
+    return CARD_RESULT_NOCARD;
+  }
   if (!CARD_READY(chan))
     return CARD_RESULT_NOCARD;
   const auto& card = GET_CARD(chan);
@@ -613,6 +616,9 @@ BOOL CARDProbe(const s32 chan) {
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto& card = GET_CARD(chan);
+  if (card == nullptr) {
+    return FALSE;
+  }
 
   aurora::card::ProbeResults probeData = card->probeCardFile(cardPaths[chan]);
   return probeData.x0_error != aurora::card::ECardResult::NOCARD ? TRUE : FALSE;
@@ -623,6 +629,11 @@ s32 CARDProbeEx(const s32 chan, s32* memSize, s32* sectorSize) {
     return CARD_RESULT_FATAL_ERROR;
   }
   const auto& card = GET_CARD(chan);
+  if (card == nullptr) {
+    if (memSize != nullptr) *memSize = 0;
+    if (sectorSize != nullptr) *sectorSize = 0;
+    return CARD_RESULT_NOCARD;
+  }
 
   // ReSharper disable once CppUseStructuredBinding
   const aurora::card::ProbeResults probeData = card->probeCardFile(cardPaths[chan]);
@@ -739,6 +750,9 @@ s32 CARDCancel(CARDFileInfo* fileInfo [[maybe_unused]]) {
 s32 CARDClose(CARDFileInfo* fileInfo) {
   if (fileInfo->chan < 0 || fileInfo->chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
+  }
+  if (melee_pc_harness_no_card()) {
+    return CARD_RESULT_NOCARD;
   }
   if (!CARD_READY(fileInfo->chan))
     return CARD_RESULT_NOCARD;

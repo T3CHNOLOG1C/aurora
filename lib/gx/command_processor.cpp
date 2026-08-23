@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace aurora::gx::fifo {
@@ -162,6 +163,27 @@ struct DrawCache {
   GXVtxFmt lastDrawFmt = GX_MAX_VTXFMT;
 };
 DrawCache sDrawCache;
+
+struct ArrayUploadKey {
+  const void* data;
+  bool le;
+  bool wordSwapped;
+
+  bool operator==(const ArrayUploadKey& rhs) const {
+    return data == rhs.data && le == rhs.le && wordSwapped == rhs.wordSwapped;
+  }
+};
+
+struct ArrayUploadKeyHash {
+  size_t operator()(const ArrayUploadKey& key) const {
+    size_t h = std::hash<const void*>{}(key.data);
+    h ^= static_cast<size_t>(key.le) << 1;
+    h ^= static_cast<size_t>(key.wordSwapped) << 2;
+    return h;
+  }
+};
+
+std::unordered_map<ArrayUploadKey, gfx::Range, ArrayUploadKeyHash> sArrayUploadCache;
 
 u8 line_mode_for_prim(GXPrimitive prim) noexcept {
   switch (prim) {
@@ -514,7 +536,7 @@ static u32 calc_vtx_size(GXVtxFmt fmt) noexcept {
  * of HSD archives always are; anything else falls back to an untransformed
  * upload rather than silently producing different garbage.
  */
-static gfx::Range push_array_storage(const AttrArray& array) noexcept {
+static gfx::Range push_array_storage_uncached(const AttrArray& array) noexcept {
   const auto* src = static_cast<const uint8_t*>(array.data);
   if (!array.wordSwapped || src == nullptr || array.size == 0) {
     return gfx::push_storage(src, array.size);
@@ -534,10 +556,10 @@ static gfx::Range push_array_storage(const AttrArray& array) noexcept {
   scratch.resize(array.size);
   const u32 wholeWords = array.size & ~3u;
   for (u32 i = 0; i < wholeWords; i += 4) {
-    scratch[i + 0] = src[i + 3];
-    scratch[i + 1] = src[i + 2];
-    scratch[i + 2] = src[i + 1];
-    scratch[i + 3] = src[i + 0];
+    u32 word;
+    memcpy(&word, src + i, sizeof(word));
+    word = __builtin_bswap32(word);
+    memcpy(scratch.data() + i, &word, sizeof(word));
   }
   // A trailing partial word cannot be un-swapped (its missing bytes were swapped
   // out of range); copy it through so behaviour matches the untransformed path.
@@ -545,6 +567,17 @@ static gfx::Range push_array_storage(const AttrArray& array) noexcept {
     scratch[i] = src[i];
   }
   return gfx::push_storage(scratch.data(), scratch.size());
+}
+
+static gfx::Range push_array_storage(const AttrArray& array) noexcept {
+  const ArrayUploadKey key{array.data, array.le, array.wordSwapped};
+  const auto found = sArrayUploadCache.find(key);
+  if (found != sArrayUploadCache.end() && found->second.size >= array.size) {
+    return found->second;
+  }
+  const gfx::Range range = push_array_storage_uncached(array);
+  sArrayUploadCache.insert_or_assign(key, range);
+  return range;
 }
 
 static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Range vertRange, gfx::Range idxRange,
@@ -559,6 +592,10 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     }
     auto& array = state.arrays[i];
     if (array.cachedRange.size == 0) {
+      /* GX display lists use explicit attribute indices; vtxCount is the
+       * number of vertices emitted, not the maximum index into every array.
+       * Trimming by vtxCount truncates shared/indexed arrays and corrupts
+       * geometry (including HUD glyphs). */
       array.cachedRange = push_array_storage(array);
     }
     immediates.arrayStart[i - GX_VA_POS] = array.cachedRange.offset;
@@ -941,6 +978,7 @@ void handle_aurora(Reader& reader) noexcept {
 void clear_draw_cache() noexcept {
   sDrawCache.bindGeneration = 0;
   sDrawCache.uniformRange = {};
+  sArrayUploadCache.clear();
 }
 
 } // namespace aurora::gx::fifo

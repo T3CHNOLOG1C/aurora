@@ -15,7 +15,10 @@ u32 sBeginSizeOffset = 0;
 bool sBeginAuto = false;
 
 void pre_begin() {
-  CHECK(!sInBegin, "GXBegin: called without matching GXEnd");
+  if (sInBegin) {
+    Log.warn("GXBegin: recovering unmatched prior GXBegin");
+    GXEnd();
+  }
 
   // Flush dirty state before starting a draw
   if (__gx->dirtyState != 0) {

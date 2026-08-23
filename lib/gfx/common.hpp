@@ -220,7 +220,9 @@ inline constexpr uint64_t IndexBufferSize = 2097152;     // 2mb
  * Same reasoning as every prior bump: a real, finite per-frame
  * requirement, not a leak -- headroom is cheap relative to one abort
  * per frame that fills it. */
-inline constexpr uint64_t StorageBufferSize = 67108864;  // 64mb
+/* Mute City can emit 67371008 bytes in one frame with the sanitizer build;
+ * keep a small measured headroom margin in the host staging window. */
+inline constexpr uint64_t StorageBufferSize = 83886080;  // 80mb
 inline constexpr uint64_t TextureUploadSize = 25165824;  // 24mb
 
 extern AuroraStats g_stats;
