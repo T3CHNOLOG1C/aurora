@@ -464,9 +464,17 @@ s32 CARDGetAttributes(const s32 chan, const s32 fileNo [[maybe_unused]], u8* att
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  CARD_STUB
-  return CARD_RESULT_READY;
+  // Not implemented: ICard/CardStat here carry no per-file attribute byte
+  // to read (see ICard.hpp), so there is nothing real to answer with.
+  // Previously returned CARD_RESULT_READY unconditionally, which is a
+  // silent lie -- *attr would be left uninitialized garbage that the
+  // caller is told to trust. Not currently called anywhere in decomp/src
+  // (grep-confirmed), so this can't regress anything live; failing loudly
+  // means a future caller finds out immediately instead of trusting
+  // garbage. Log.error rather than the quieter CARD_STUB debug line, to
+  // stand out if this is ever actually reached.
+  Log.error("CARDGetAttributes is not implemented (fileNo={})", fileNo);
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDGetEncoding(const s32 chan, u16* encode) {
@@ -481,12 +489,26 @@ s32 CARDGetEncoding(const s32 chan, u16* encode) {
   return CARD_RESULT_READY;
 }
 
-s32 CARDGetMemSize(const s32 chan, u16* size [[maybe_unused]]) {
+s32 CARDGetMemSize(const s32 chan, u16* size) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  CARD_STUB
+  const auto& card = GET_CARD(chan);
+  if (card == nullptr) {
+    return CARD_RESULT_NOCARD;
+  }
+  // Unlike the attribute/mode stubs, real data for this exists -- the
+  // same probeCardFile() CARDProbeEx already uses -- so there is no
+  // reason to leave it a lying stub. x4_cardSize is bytes; real hardware
+  // returns memory size in Mbits, but nothing in decomp/src reads this
+  // (grep-confirmed) so there is no established retail-callsite
+  // convention to match here. Bytes is the least surprising choice if
+  // that ever changes.
+  const aurora::card::ProbeResults probeData = card->probeCardFile(cardPaths[chan]);
+  if (probeData.x0_error != aurora::card::ECardResult::READY) {
+    return static_cast<s32>(probeData.x0_error);
+  }
+  *size = static_cast<u16>(probeData.x4_cardSize);
   return CARD_RESULT_READY;
 }
 
@@ -528,9 +550,14 @@ s32 __CARDGetStatusEx(const s32 chan, const s32 fileNo [[maybe_unused]], CARDDir
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  CARD_STUB
-  return CARD_RESULT_READY;
+  // Not implemented: no raw CARDDir-shaped directory-entry accessor
+  // exists on ICard (see ICard.hpp; CardStat is the closest thing, and
+  // this asks for the raw on-disk entry, not the translated stat). Not
+  // currently called anywhere in decomp/src (grep-confirmed). Same
+  // reasoning as CARDGetAttributes just above: fail loudly instead of
+  // handing back an unfilled `*dirent` dressed up as CARD_RESULT_READY.
+  Log.error("__CARDGetStatusEx is not implemented (fileNo={})", fileNo);
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDGetStatus(const s32 chan, s32 fileNo, CARDStat* stat) {
@@ -593,9 +620,6 @@ s32 CARDMountAsync(const s32 chan, void* workArea [[maybe_unused]], const CARDCa
 s32 CARDOpen(const s32 chan, const char* fileName, CARDFileInfo* fileInfo) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
-  }
-  if (melee_pc_harness_no_card()) {
-    return CARD_RESULT_NOCARD;
   }
   if (!CARD_READY(chan))
     return CARD_RESULT_NOCARD;
@@ -668,24 +692,32 @@ s32 CARDSetAttributesAsync(const s32 chan, s32 fileNo [[maybe_unused]], u8 attr 
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  CARD_STUB
-  // See CARDMountAsync above / src/card_compat.c: decomp callers wait on
-  // this callback firing to clear a busy flag they set right after this
-  // call returns -- a stub that never calls it hangs them forever.
+  // Not implemented, same reasoning as CARDSetAttributes below -- but
+  // unlike that one, this MUST still fire the callback even on failure:
+  // decomp callers (see CARDMountAsync above / src/card_compat.c) submit-
+  // then-mark-busy and rely on the callback to clear that busy state, so
+  // a stub that never calls it hangs them forever regardless of what
+  // result it reports. Reporting the honest failure here (rather than
+  // CARD_RESULT_READY) at least lets a future caller's error handling
+  // run instead of believing an attribute write happened.
+  Log.error("CARDSetAttributesAsync is not implemented (fileNo={})", fileNo);
   if (callback != nullptr) {
-    melee_card_enqueue_callback(callback, chan, CARD_RESULT_READY);
+    melee_card_enqueue_callback(callback, chan, CARD_RESULT_FATAL_ERROR);
   }
-  return CARD_RESULT_READY;
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDSetAttributes(const s32 chan, s32 fileNo [[maybe_unused]], u8 attr [[maybe_unused]]) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  CARD_STUB
-  return CARD_RESULT_READY;
+  // Not implemented: same gap as CARDGetAttributes above -- no attribute
+  // byte exists anywhere in ICard/CardStat to write. Not currently called
+  // anywhere in decomp/src (grep-confirmed). Previously returned
+  // CARD_RESULT_READY, silently discarding the write instead of failing;
+  // fail loudly instead.
+  Log.error("CARDSetAttributes is not implemented (fileNo={})", fileNo);
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDSetStatus(const s32 chan, s32 fileNo, const CARDStat* stat) {
@@ -712,9 +744,12 @@ s32 __CARDSetStatusEx(const s32 chan, s32 fileNo [[maybe_unused]], CARDDir* dire
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  CARD_STUB
-  return CARD_RESULT_READY;
+  // Not implemented, same gap as __CARDGetStatusEx above: no raw
+  // CARDDir-shaped write path on ICard. Not currently called anywhere in
+  // decomp/src (grep-confirmed). Fail loudly instead of pretending a
+  // directory-entry write happened.
+  Log.error("__CARDSetStatusEx is not implemented (fileNo={})", fileNo);
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDSetStatusAsync(const s32 chan, const s32 fileNo, const CARDStat* stat, const CARDCallback callback) {
@@ -730,29 +765,49 @@ s32 CARDUnmount(const s32 chan) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  return CARD_RESULT_NOCARD;
+  // Mounting here (CARDMountAsync above) never actually attaches/detaches
+  // anything -- CardChannels[chan] is constructed once in CARDInit and
+  // stays valid for the process lifetime, there is no real "unmounted"
+  // state to enter. Returning CARD_RESULT_NOCARD claimed the opposite of
+  // that: lbcardnew.c's lb_80019CB0 (the only caller, after every full
+  // mount/check/open/... task chain) discards this return value today, so
+  // it's currently inert, but the value itself was a lie -- the channel
+  // is still perfectly ready to use. CARD_READY(chan) is unaffected by
+  // mount state either way (see its definition above), so this is a
+  // truthful no-op rather than a functional change.
+  if (!CARD_READY(chan))
+    return CARD_RESULT_NOCARD;
+  return CARD_RESULT_READY;
 }
 
 s32 CARDGetCurrentMode(const s32 chan, u32* mode [[maybe_unused]]) {
   if (chan < 0 || chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
-  // TODO:
-  return CARD_RESULT_NOCARD;
+  // Not implemented: no compatibility-mode concept tracked anywhere in
+  // ICard. Not currently called anywhere in decomp/src (grep-confirmed).
+  // Previously returned CARD_RESULT_NOCARD unconditionally, which reads
+  // as "no memory card present" -- actively misleading for a card that
+  // is otherwise mounted and working, and indistinguishable from a real
+  // no-card condition to any caller checking this return value. Using
+  // FATAL_ERROR instead, consistent with the other not-implemented stubs
+  // in this file, so "unimplemented" and "no card" aren't confusable.
+  Log.error("CARDGetCurrentMode is not implemented");
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDCancel(CARDFileInfo* fileInfo [[maybe_unused]]) {
-  // TODO:ge
-  return CARD_RESULT_NOCARD;
+  // Not implemented: no async-operation-in-flight concept exists to
+  // cancel (every CARD*Async call here already completes synchronously
+  // before returning, see CARDReadAsync/CARDWriteAsync/etc. above). Same
+  // CARD_RESULT_NOCARD-is-misleading issue as CARDGetCurrentMode above.
+  Log.error("CARDCancel is not implemented");
+  return CARD_RESULT_FATAL_ERROR;
 }
 
 s32 CARDClose(CARDFileInfo* fileInfo) {
   if (fileInfo->chan < 0 || fileInfo->chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
-  }
-  if (melee_pc_harness_no_card()) {
-    return CARD_RESULT_NOCARD;
   }
   if (!CARD_READY(fileInfo->chan))
     return CARD_RESULT_NOCARD;
