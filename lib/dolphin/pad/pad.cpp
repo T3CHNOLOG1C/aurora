@@ -5,6 +5,7 @@
 #include <dolphin/pad.h>
 #include <dolphin/si.h>
 #include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_init.h>
 
 #include <array>
 #include <sys/stat.h>
@@ -432,7 +433,33 @@ u32 PADRescanControllers() {
       }
     }
     SDL_free(ids);
+  } else {
+    aurora::input::Log.warn("SDL_GetGamepads failed during rescan: {}", SDL_GetError());
   }
+
+  /* Deck/Steam Input: when Steam reclaims the virtual controller (focus
+   * loss, overlay), the SDL device vanishes and plain enumeration never
+   * sees it again -- observed live: repeated rescans report "added 0"
+   * with the pad physically present. If a polite rescan found nothing
+   * and nothing is connected, bounce the gamepad subsystem: this forces
+   * SDL to re-enumerate HIDAPI/virtual devices from scratch. Existing
+   * handles are closed first so the map never points at freed pads. */
+  if (added == 0 && aurora::input::g_GameControllers.empty()) {
+    aurora::input::Log.info("PADRescanControllers: empty after rescan; reinitializing gamepad subsystem");
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+      aurora::input::Log.warn("SDL_InitSubSystem(GAMEPAD) failed: {}", SDL_GetError());
+    } else if (SDL_JoystickID* ids = SDL_GetGamepads(&count); ids != nullptr) {
+      for (int i = 0; i < count; ++i) {
+        if (!aurora::input::g_GameControllers.contains(ids[i]) && aurora::input::add_controller(ids[i]) != -1) {
+          ++added;
+        }
+      }
+      SDL_free(ids);
+    }
+  }
+  aurora::input::Log.info("PADRescanControllers: removed {}, added {} (total {})", stale.size(), added,
+                           aurora::input::g_GameControllers.size());
   return added;
 }
 
