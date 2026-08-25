@@ -400,6 +400,7 @@ SDL_JoystickID add_controller(SDL_JoystickID which) noexcept {
     return instance;
   }
 
+  Log.warn("Failed to open gamepad (joystick id {}): {}", which, SDL_GetError());
   return -1;
 }
 
