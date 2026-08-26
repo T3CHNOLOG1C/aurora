@@ -36,7 +36,13 @@
 #include <vector>
 
 namespace aurora {
-AuroraConfig g_config;
+// Defaults so pre-main consumers of OSInit/MEM1 (e.g. static initializers
+// in consumer projects) get sane sizes before aurora_initialize runs.
+AuroraConfig g_config{
+    .appName = "Aurora",
+    .mem1Size = 128U * 1024U * 1024U,
+    .mem2Size = ARAM_DEFAULT_SIZE,
+};
 uint32_t g_sdlCustomEventsStart;
 char g_gameName[4];
 
