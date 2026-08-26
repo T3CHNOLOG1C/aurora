@@ -82,8 +82,11 @@ u32 ARGetSize(void) { return aurora::g_config.mem2Size; }
 #if !defined(_MSC_VER)
 #pragma mark ARQ
 #endif
-void ARQPostRequest(ARQRequest* request, u32 owner, u32 type, u32 priority, uintptr_t source, uintptr_t dest,
-                    u32 length, ARQCallback callback) {
+// openstrikers-pc: renamed so src/pc/arq_compat.cpp can interpose (unswap
+// DVD-touched MRAM before it DMA's into ARAM), mirroring the
+// Aurora_DVDReadAsyncPrio_Real pattern used by melee-pc.
+void Aurora_ARQPostRequest_Real(ARQRequest* request, u32 owner, u32 type, u32 priority, uintptr_t source,
+                                uintptr_t dest, u32 length, ARQCallback callback) {
   // Emulate ARAM DMA transfers using memcpy.
   // type 0 = MRAM -> ARAM, type 1 = ARAM -> MRAM
   if (type == ARAM_DIR_MRAM_TO_ARAM) {
