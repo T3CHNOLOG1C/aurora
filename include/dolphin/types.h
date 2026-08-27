@@ -12,6 +12,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
+
 /* Likewise, the decomp's <stdio.h> resolves to src/MSL/stdio.h (the
  * Metrowerks C library's own stdio, reached via -isystemsrc/MSL), not the
  * real one -- and that header, not this location, is where
@@ -56,7 +60,12 @@ typedef unsigned int usize_t;
 static inline void* __va_arg(void* list, unsigned char type) {
     (void) list;
     (void) type;
+#if defined(_MSC_VER) && !defined(__clang__)
+    __debugbreak();
+#else
     __builtin_trap();
+#endif
+    return NULL;
 }
 
 #if _WIN64 || __LP64__
