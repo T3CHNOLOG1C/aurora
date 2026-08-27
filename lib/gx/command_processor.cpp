@@ -558,7 +558,7 @@ static gfx::Range push_array_storage_uncached(const AttrArray& array) noexcept {
   for (u32 i = 0; i < wholeWords; i += 4) {
     u32 word;
     memcpy(&word, src + i, sizeof(word));
-    word = __builtin_bswap32(word);
+    word = bswap(word);
     memcpy(scratch.data() + i, &word, sizeof(word));
   }
   // A trailing partial word cannot be un-swapped (its missing bytes were swapped

@@ -5,6 +5,13 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#define MELEE_TRACE_RETURN_ADDRESS() _ReturnAddress()
+#else
+#define MELEE_TRACE_RETURN_ADDRESS() __builtin_return_address(0)
+#endif
+
 namespace {
 // Track vertex count between GXBegin/GXEnd for mismatch detection
 u16 sBeginNVerts = 0;
@@ -57,7 +64,7 @@ void GXBegin(GXPrimitive primitive, GXVtxFmt vtxFmt, u16 nVerts) {
   if (melee_trace_begin_count < melee_trace_begin_budget()) {
     ++melee_trace_begin_count;
     std::fprintf(stderr, "PROGDBG GXBegin #%d prim=%#x fmt=%d nVerts=%u caller=%p\n", melee_trace_begin_count,
-                 static_cast<unsigned>(primitive), static_cast<int>(vtxFmt), nVerts, __builtin_return_address(0));
+                 static_cast<unsigned>(primitive), static_cast<int>(vtxFmt), nVerts, MELEE_TRACE_RETURN_ADDRESS());
   }
   pre_begin();
 
@@ -99,7 +106,7 @@ void GXBeginIndexed(GXVtxFmt vtxFmt, u16 nVerts, const u16* indices, u32 nIndice
 
 void GXEnd() {
   if (melee_trace_begin_count < melee_trace_begin_budget()) {
-    std::fprintf(stderr, "PROGDBG GXEnd sInBegin=%d caller=%p\n", sInBegin, __builtin_return_address(0));
+    std::fprintf(stderr, "PROGDBG GXEnd sInBegin=%d caller=%p\n", sInBegin, MELEE_TRACE_RETURN_ADDRESS());
   }
   if (sInBegin) {
     u32 bytesWritten = aurora::gx::fifo::get_buffer_size() - sBeginFifoSize;
