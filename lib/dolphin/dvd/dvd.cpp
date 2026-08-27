@@ -1182,6 +1182,15 @@ BOOL Aurora_DVDReadAsyncPrio_Real(DVDFileInfo* fileInfo, void* addr, s32 length,
   return TRUE;
 }
 
+// Weak default so aurora links and works standalone (its own tests, a
+// non-Melee consumer). The host game project's dvd_compat.c provides the
+// real byte-swapping definition of this public name, which overrides this
+// at link time -- see dolphin/dvd_real.h.
+extern "C" DECL_WEAK BOOL DVDReadAsyncPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset,
+                                            DVDCallback callback, s32 prio) {
+  return Aurora_DVDReadAsyncPrio_Real(fileInfo, addr, length, offset, callback, prio);
+}
+
 s32 DVDReadPrio(DVDFileInfo* fileInfo, void* addr, s32 length, s32 offset, s32 prio) {
   if (!DVDReadAsyncPrio(fileInfo, addr, length, offset, nullptr, prio)) {
     return DVD_RESULT_FATAL_ERROR;
