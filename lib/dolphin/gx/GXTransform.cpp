@@ -7,7 +7,9 @@
 #include <cstring>
 #include <algorithm>
 #include <cmath>
+#if !defined(_WIN32)
 #include <execinfo.h>
+#endif
 
 static inline void CacheProjectionVector(const f32* ptr, GXProjectionType type) {
   __gx->projType = type;
@@ -57,6 +59,7 @@ static bool melee_trace_vp_enabled() { return melee_trace_vp_level() > 0; }
  * put a conditional breakpoint here on this optimized build. Budgeted so a
  * per-frame bug does not produce a per-frame backtrace. */
 static void melee_trace_vp_backtrace() {
+#if !defined(_WIN32)
   static int budget = 3;
   if (melee_trace_vp_level() < 2 || budget <= 0) {
     return;
@@ -66,6 +69,7 @@ static void melee_trace_vp_backtrace() {
   const int n = backtrace(frames, 32);
   std::fprintf(stderr, "PROGDBG VP NONFINITE backtrace (%d frames):\n", n);
   backtrace_symbols_fd(frames, n, fileno(stderr));
+#endif
 }
 
 static void melee_trace_vp(GXProjectionType type, const f32* projVec) {
