@@ -14,13 +14,18 @@
 #include "../card/CardGciFolder.hpp"
 #include "../fs_helper.hpp"
 
-#include <melee_card_compat.h>
-
-/* melee_pc_harness.h isn't included directly: it pulls in decomp's
- * platform.h, which isn't on this library's include path. Just the one
- * function needed here, matching melee_main.c's own precedent for a
- * narrow local declaration instead of a cross-tree header. */
+/* melee_card_compat.h and melee_pc_harness.h aren't included directly:
+ * both live in OpenMelee's own include/ tree, which isn't on this
+ * library's include path when aurora is built standalone (e.g. its own
+ * CI). Declare just the symbols this file calls, matching melee_main.c's
+ * own precedent for a narrow local declaration instead of a cross-tree
+ * header. OpenMelee's build still provides the real definitions
+ * (src/card_compat.c, src/melee_pc_harness.c); aurora_card only needs to
+ * *compile* standalone (e.g. its own CI just builds the library, it
+ * doesn't link a final executable), so the missing symbols at link time
+ * are harmless outside OpenMelee. */
 extern "C" int melee_pc_harness_no_card(void);
+extern "C" void melee_card_enqueue_callback(CARDCallback callback, s32 chan, s32 result);
 
 namespace {
 aurora::Module Log("aurora::card");
