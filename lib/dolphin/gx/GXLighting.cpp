@@ -9,11 +9,17 @@
 // retrace A and retrace B, so a clean window can be diffed against a dark one
 // from the same run. Remove once the fighter-darkening bug is rooted.
 extern "C" u32 VIGetRetraceCount(void);
+// The standalone Aurora smoketest/tests do not link the game VI shim. Keep
+// the optional diagnostic usable there while allowing the game to provide
+// its real strong definition.
 #if defined(__GNUC__)
-// The standalone Aurora smoketest does not link the game VI shim. Keep the
-// optional diagnostic usable there while allowing the game to provide its
-// real strong definition.
 extern "C" __attribute__((weak)) u32 VIGetRetraceCount(void) { return 0; }
+#elif defined(_MSC_VER)
+// MSVC has no function-level weak-symbol attribute; emulate one with the
+// classic /alternatename linker trick instead (x64 extern "C" symbols are
+// undecorated, so the names below match as-is).
+extern "C" u32 VIGetRetraceCount_MeleePcDefault(void) { return 0; }
+#pragma comment(linker, "/alternatename:VIGetRetraceCount=VIGetRetraceCount_MeleePcDefault")
 #endif
 static bool melee_pc_gxlog_active() {
   static long w1 = -1, w2 = -1;
