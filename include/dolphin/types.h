@@ -12,10 +12,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#if defined(_MSC_VER) && !defined(__clang__)
-#include <intrin.h>
-#endif
-
 /* Likewise, the decomp's <stdio.h> resolves to src/MSL/stdio.h (the
  * Metrowerks C library's own stdio, reached via -isystemsrc/MSL), not the
  * real one -- and that header, not this location, is where
@@ -57,16 +53,17 @@ typedef unsigned int usize_t;
  * pc_port.md entry (96) fix 8, which supersedes item 9's "not bridged
  * yet". */
 #define _var_arg_typeof(e) 0
+/* MSVC claims `__va_arg` as a reserved compiler intrinsic name (error
+ * C2169: cannot be defined) -- it isn't user-definable there at all, so
+ * this trap-loudly stub is GCC/Clang-only. No decomp TU on this project
+ * builds under MSVC (see pc_port.md), so nothing needs it there. */
+#if !defined(_MSC_VER) || defined(__clang__)
 static inline void* __va_arg(void* list, unsigned char type) {
     (void) list;
     (void) type;
-#if defined(_MSC_VER) && !defined(__clang__)
-    __debugbreak();
-#else
     __builtin_trap();
-#endif
-    return NULL;
 }
+#endif
 
 #if _WIN64 || __LP64__
 #define BIT_64 1
