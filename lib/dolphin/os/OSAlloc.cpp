@@ -416,6 +416,17 @@ void Aurora_OSFreeToHeap_Real(OSHeapHandle heap, void* ptr) {
   hd.freeList = insertAndCoalesce(hd.freeList, cell);
 }
 
+// Weak default so aurora links and works standalone (its own tests, a
+// non-Melee consumer). The host game project's os_alloc_compat.c provides
+// the real cross-thread-locking definitions of these public names, which
+// override these at link time -- see dolphin/os_alloc_real.h.
+extern "C" DECL_WEAK void* OSAllocFromHeap(OSHeapHandle heap, u32 size) {
+  return Aurora_OSAllocFromHeap_Real(heap, size);
+}
+extern "C" DECL_WEAK void OSFreeToHeap(OSHeapHandle heap, void* ptr) {
+  Aurora_OSFreeToHeap_Real(heap, ptr);
+}
+
 OSHeapHandle OSSetCurrentHeap(OSHeapHandle heap) {
   const auto prev = __OSCurrHeap;
   if (heap == -1 || validHeapHandle(heap)) {
