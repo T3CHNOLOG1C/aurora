@@ -317,7 +317,7 @@ bool create_window(AuroraBackend backend) {
   }
 
   const auto props = SDL_CreateProperties();
-  TRY(SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, g_config.appName), "Failed to set {}: {}",
+  TRY(SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, g_config.windowTitle), "Failed to set {}: {}",
       SDL_PROP_WINDOW_CREATE_TITLE_STRING, SDL_GetError());
   TRY(SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, posX), "Failed to set {}: {}",
       SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_GetError());

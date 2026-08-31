@@ -141,7 +141,15 @@ typedef int BOOL;
 #if defined(__MWERKS__)
 #define AT_ADDRESS(addr) : (addr)
 #define ATTRIBUTE_ALIGN(num) __attribute__((aligned(num)))
-#elif defined(__GNUC__)
+/* __clang__ is checked before _MSC_VER on purpose. clang targeting the MSVC
+ * ABI defines _MSC_VER but not __GNUC__, so it used to fall into the
+ * __declspec branch below -- and __declspec(align(n)) must PRECEDE a
+ * declaration, whereas this codebase writes ATTRIBUTE_ALIGN after the
+ * declarator (`struct Allocator foo ATTRIBUTE_ALIGN(8);`, lbmemory.c and
+ * ~7 other TUs), which is only legal for trailing __attribute__. clang
+ * accepts __attribute__ on every target, so prefer it whenever the compiler
+ * is clang, regardless of which ABI it is targeting. */
+#elif defined(__GNUC__) || defined(__clang__)
 #define AT_ADDRESS(addr)
 #define ATTRIBUTE_ALIGN(num) __attribute__((aligned(num)))
 #elif defined(_MSC_VER)

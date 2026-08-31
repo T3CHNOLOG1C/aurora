@@ -272,6 +272,13 @@ AuroraInfo initialize(int argc, char* argv[], const AuroraConfig& config) noexce
   } else {
     g_config.appName = strdup(g_config.appName);
   }
+  // Resolved after appName so it can fall back to it, but deliberately never
+  // fed to SDL_GetPrefPath below -- see the field comment in aurora.h.
+  if (g_config.windowTitle == nullptr) {
+    g_config.windowTitle = strdup(g_config.appName);
+  } else {
+    g_config.windowTitle = strdup(g_config.windowTitle);
+  }
   if (g_config.userPath == nullptr) {
     g_config.userPath = SDL_GetPrefPath(nullptr, g_config.appName);
   } else {

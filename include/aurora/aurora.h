@@ -81,6 +81,12 @@ typedef void (*AuroraImGuiInitCallback)(const AuroraWindowSize* size);
 
 typedef struct {
   const char* appName;
+  /* Text shown in the window title bar. Defaults to appName when null.
+   * Kept separate from appName because appName also seeds userPath and
+   * cachePath via SDL_GetPrefPath -- a title that varies (e.g. one
+   * carrying a build/commit id) must not move the save or shader-cache
+   * directory along with it. */
+  const char* windowTitle;
   const char* userPath;
   const char* cachePath;
   const char* resourcesPath;

@@ -212,11 +212,17 @@ std::atomic<u32> sDiagGen{0};
 void gxdiag_rearm_handler(int) noexcept { sDiagGen.fetch_add(1, std::memory_order_relaxed); }
 
 u32 gxdiag_gen() noexcept {
+#if !defined(_WIN32)
+  /* Windows has no SIGUSR1, so the `kill -USR1 <pid>` re-arm is POSIX-only.
+   * The generation counter itself still works everywhere -- it just never
+   * advances on Windows, which degrades this probe to "log each unique tuple
+   * once per run" rather than breaking it. */
   static const bool installed = [] {
     std::signal(SIGUSR1, gxdiag_rearm_handler);
     return true;
   }();
   (void) installed;
+#endif
   return sDiagGen.load(std::memory_order_relaxed);
 }
 
