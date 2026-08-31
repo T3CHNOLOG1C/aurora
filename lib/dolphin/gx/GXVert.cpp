@@ -17,13 +17,14 @@ namespace {
 u16 sBeginNVerts = 0;
 u32 sBeginFifoSize = 0;
 bool sInBegin = false;
+void* sBeginCaller = nullptr;
 // GX_AUTO: offset of the u32 byte-length placeholder to patch in GXEnd
 u32 sBeginSizeOffset = 0;
 bool sBeginAuto = false;
 
 void pre_begin() {
   if (sInBegin) {
-    Log.warn("GXBegin: recovering unmatched prior GXBegin");
+    Log.warn("GXBegin: recovering unmatched prior GXBegin from {}", sBeginCaller);
     GXEnd();
   }
 
@@ -82,6 +83,7 @@ void GXBegin(GXPrimitive primitive, GXVtxFmt vtxFmt, u16 nVerts) {
   }
 
   post_begin(nVerts);
+  sBeginCaller = MELEE_TRACE_RETURN_ADDRESS();
 }
 
 void GXBeginIndexed(GXVtxFmt vtxFmt, u16 nVerts, const u16* indices, u32 nIndices) {
@@ -117,7 +119,8 @@ void GXEnd() {
       u32 vtxSize = bytesWritten / sBeginNVerts;
       u32 remainder = bytesWritten % sBeginNVerts;
       if (remainder != 0) {
-        Log.warn("GXEnd: vertex data not evenly divisible: {} bytes for {} vertices", bytesWritten, sBeginNVerts);
+        Log.warn("GXEnd: vertex data not evenly divisible: {} bytes for {} vertices (begin caller {}, end caller {})",
+                 bytesWritten, sBeginNVerts, sBeginCaller, MELEE_TRACE_RETURN_ADDRESS());
       }
       u32 actualVerts = (vtxSize > 0) ? bytesWritten / vtxSize : 0;
       CHECK(actualVerts == sBeginNVerts,

@@ -17,6 +17,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <set>
+#include <tuple>
 #include <list>
 #include <optional>
 #include <utility>
@@ -296,6 +298,26 @@ TextureKeys hash_texture_source(const GXTexObj_& obj, const GXTlutObj_* tlut, bo
       .mipCount = obj.mip_count(),
   };
   s_stats.hashedBytes += textureBytes;
+
+  /* melee-pc: flag textures whose source bytes are uniform.  A surface rendering as
+   * one flat colour while its neighbours texture correctly must be sampling a
+   * degenerate texture; this reports that for every format, not just palette ones.
+   * Diagnostic only -- remove once the Underground Maze bug is closed. */
+  if (getenv("MELEE_PC_GXDIAG") != nullptr) {
+    static std::set<const void*> seenTex;
+    if (seenTex.insert(obj.data).second) {
+      const auto* srcBytes = static_cast<const uint8_t*>(obj.data);
+      u8 lo = 0xffu, hi = 0u;
+      for (size_t b = 0; b < textureBytes; ++b) {
+        lo = std::min(lo, srcBytes[b]);
+        hi = std::max(hi, srcBytes[b]);
+      }
+      Log.error("GXTEX data={} host={} fmt={} {}x{} mips={} bytes={} byteRange[{},{}] {}", obj.data,
+                reinterpret_cast<uintptr_t>(obj.data) < 0x80000000ull,
+                static_cast<u32>(obj.format()), obj.width(), obj.height(), obj.mip_count(), textureBytes, lo, hi,
+                lo == hi ? "UNIFORM" : "");
+    }
+  }
 
   uint32_t minTlutIndex = UINT32_MAX;
   uint32_t maxTlutIndex = 0;

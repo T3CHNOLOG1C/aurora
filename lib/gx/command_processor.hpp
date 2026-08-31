@@ -9,6 +9,7 @@ namespace aurora::gx::fifo {
 // Process a buffer of GX FIFO commands
 void process(const uint8_t* data, uint32_t size) noexcept;
 void clear_draw_cache() noexcept;
+uint32_t current_draw_index() noexcept;
 
 /* TEMPORARY diagnostic (2026-08-11): records that `nbytes` of display list from
  * `src` were copied into the FIFO starting at `fifoPos`. On a stream desync the

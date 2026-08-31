@@ -2,6 +2,48 @@
 #include "__gx.h"
 #include "dolphin/gd/GDGeometry.h"
 
+#include <cstdio>
+#include <cstdlib>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#define MELEE_TRACE_RETURN_ADDRESS() _ReturnAddress()
+#else
+#define MELEE_TRACE_RETURN_ADDRESS() __builtin_return_address(0)
+#endif
+
+
+/* melee-pc: on-demand descriptor tracing.  Logging every GXSetVtxDesc call
+ * unthrottled stalls the game, so the trace is off until a burst is requested by
+ * writing a call count to /tmp/melee-vtxtrace; the file is polled cheaply (once
+ * per 512 calls) and consumed, giving a bounded burst at the moment of interest. */
+static bool melee_vtxcall_trace() {
+  static int budget = 0;
+  static int poll = 0;
+  if (budget > 0) {
+    --budget;
+    return true;
+  }
+  if (++poll < 512) {
+    return false;
+  }
+  poll = 0;
+  FILE* f = std::fopen("/tmp/melee-vtxtrace", "r");
+  if (f == nullptr) {
+    return false;
+  }
+  int n = 0;
+  if (std::fscanf(f, "%d", &n) != 1) {
+    n = 0;
+  }
+  std::fclose(f);
+  if (n > 0) {
+    std::remove("/tmp/melee-vtxtrace");
+    budget = n;
+  }
+  return false;
+}
+
 static inline void SETVCDATTR(GXAttr attr, GXAttrType type) {
   switch (attr) {
   case GX_VA_PNMTXIDX:
@@ -155,6 +197,13 @@ static inline void SETVAT(u32* va, u32* vb, u32* vc, GXAttr attr, GXCompCnt cnt,
 extern "C" {
 
 void GXSetVtxDesc(GXAttr attr, GXAttrType type) {
+  /* melee-pc: trace descriptor setup with the caller's return address, so a VCD
+   * that is missing its POS entry can be attributed to the code path that built
+   * it. MELEE_PC_VTXCALL_LOG=1. */
+  if (melee_vtxcall_trace()) {
+    std::fprintf(stderr, "PROGDBG SETVTXDESC attr=%u type=%u caller=%p\n", static_cast<unsigned>(attr),
+                 static_cast<unsigned>(type), MELEE_TRACE_RETURN_ADDRESS());
+  }
   SETVCDATTR(attr, type);
   if (__gx->hasNrms || __gx->hasBiNrms) {
     SET_REG_FIELD(0, __gx->vcdLo, 2, 11, __gx->nrmType);
@@ -178,6 +227,9 @@ void GXSetVtxDescv(GXVtxDescList* list) {
 }
 
 void GXClearVtxDesc() {
+  if (melee_vtxcall_trace()) {
+    std::fprintf(stderr, "PROGDBG CLEARVTXDESC caller=%p\n", MELEE_TRACE_RETURN_ADDRESS());
+  }
   __gx->vcdLo = 0;
   SET_REG_FIELD(0, __gx->vcdLo, 2, 9, 1); // GX_VA_POS = GX_DIRECT
   __gx->vcdHi = 0;

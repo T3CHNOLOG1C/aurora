@@ -1,4 +1,5 @@
 #include "regs.hpp"
+#include "command_processor.hpp"
 
 #include "gx_fmt.hpp"
 #include "texture.hpp"
@@ -598,6 +599,20 @@ void cp_vcd_lo(u8, u32 value) noexcept {
   vd[GX_VA_TEX6MTXIDX] = static_cast<GXAttrType>(reg_get(value, 1, 7));
   vd[GX_VA_TEX7MTXIDX] = static_cast<GXAttrType>(reg_get(value, 1, 8));
   vd[GX_VA_POS] = static_cast<GXAttrType>(reg_get(value, 2, 9));
+  /* melee-pc: trace VCD changes so a wrong vertex descriptor at a known draw
+   * index can be attributed to the write that produced it. MELEE_PC_VCD_LOG=1. */
+  {
+    static int dbg = -1;
+    if (dbg < 0) {
+      const char* e = getenv("MELEE_PC_VCD_LOG");
+      dbg = (e != nullptr && e[0] == '1') ? 1 : 0;
+    }
+    if (dbg != 0) {
+      Log.error("VCDLO draw={} pos={} nrm={} clr0={} clr1={} raw={:#x}", aurora::gx::fifo::current_draw_index(),
+                static_cast<u32>(vd[GX_VA_POS]), static_cast<u32>(vd[GX_VA_NRM]),
+                static_cast<u32>(vd[GX_VA_CLR0]), static_cast<u32>(vd[GX_VA_CLR1]), value);
+    }
+  }
   vd[GX_VA_NRM] = static_cast<GXAttrType>(reg_get(value, 2, 11));
   vd[GX_VA_CLR0] = static_cast<GXAttrType>(reg_get(value, 2, 13));
   vd[GX_VA_CLR1] = static_cast<GXAttrType>(reg_get(value, 2, 15));
