@@ -20,11 +20,11 @@ static inline void CacheProjectionVector(const f32* ptr, GXProjectionType type) 
 
 /* TEMPORARY diagnostic (2026-08-11): one-shot trace of the transform state
  * feeding the vertex pipeline, for the "everything renders as huge distorted
- * polygons" investigation. Gated behind MELEE_PC_TRACE_MTX=<count>. */
+ * polygons" investigation. Gated behind OPENMELEE_TRACE_MTX=<count>. */
 static int melee_trace_mtx_budget() {
   static int budget = -1;
   if (budget < 0) {
-    const char* env = std::getenv("MELEE_PC_TRACE_MTX");
+    const char* env = std::getenv("OPENMELEE_TRACE_MTX");
     budget = env != nullptr ? std::atoi(env) : 0;
   }
   return budget;
@@ -40,11 +40,11 @@ static int melee_trace_pos_count = 0;
  * viewport+projection state actually *changes*, so a whole run collapses to
  * the handful of distinct camera setups the frame is built from (3D scene
  * camera, HUD ortho camera, ...) no matter how long it runs.
- * Gated behind MELEE_PC_TRACE_VP=1. */
+ * Gated behind OPENMELEE_TRACE_VP=1. */
 static int melee_trace_vp_level() {
   static int level = -1;
   if (level < 0) {
-    const char* env = std::getenv("MELEE_PC_TRACE_VP");
+    const char* env = std::getenv("OPENMELEE_TRACE_VP");
     level = env != nullptr ? std::max(1, std::atoi(env)) : 0;
   }
   return level;

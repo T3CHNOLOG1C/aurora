@@ -48,11 +48,11 @@ void post_begin(u16 nVerts) {
 
 /* TEMPORARY diagnostic (2026-08-11): log immediate-mode primitive submissions,
  * for the "SIS text emits no geometry" investigation.
- * MELEE_PC_TRACE_BEGIN=<count>. */
+ * OPENMELEE_TRACE_BEGIN=<count>. */
 static int melee_trace_begin_budget() {
   static int budget = -1;
   if (budget < 0) {
-    const char* env = std::getenv("MELEE_PC_TRACE_BEGIN");
+    const char* env = std::getenv("OPENMELEE_TRACE_BEGIN");
     budget = env != nullptr ? std::atoi(env) : 0;
   }
   return budget;

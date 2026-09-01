@@ -299,11 +299,11 @@ TextureKeys hash_texture_source(const GXTexObj_& obj, const GXTlutObj_* tlut, bo
   };
   s_stats.hashedBytes += textureBytes;
 
-  /* melee-pc: flag textures whose source bytes are uniform.  A surface rendering as
+  /* OpenMelee: flag textures whose source bytes are uniform.  A surface rendering as
    * one flat colour while its neighbours texture correctly must be sampling a
    * degenerate texture; this reports that for every format, not just palette ones.
    * Diagnostic only -- remove once the Underground Maze bug is closed. */
-  if (getenv("MELEE_PC_GXDIAG") != nullptr) {
+  if (getenv("OPENMELEE_GXDIAG") != nullptr) {
     static std::set<const void*> seenTex;
     if (seenTex.insert(obj.data).second) {
       const auto* srcBytes = static_cast<const uint8_t*>(obj.data);
@@ -894,8 +894,8 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
       }
     } else if (copyRef != nullptr) {
       handle = copyRef->handle;
-      // TEMP melee-pc diagnostic (results-portrait/magnifier blank EFB textures)
-      if (getenv("MELEE_PC_EFBCOPY_TRACE") != nullptr) {
+      // TEMP OpenMelee diagnostic (results-portrait/magnifier blank EFB textures)
+      if (getenv("OPENMELEE_EFBCOPY_TRACE") != nullptr) {
         fprintf(stderr, "AUR-BINDCOPY data=%p rev=%u fmt=%d %ux%u\n", obj.data, copyRef->revision, (int)obj.format(),
                 obj.width(), obj.height());
       }

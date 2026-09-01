@@ -13,7 +13,7 @@
 #endif
 
 
-/* melee-pc: on-demand descriptor tracing.  Logging every GXSetVtxDesc call
+/* OpenMelee: on-demand descriptor tracing.  Logging every GXSetVtxDesc call
  * unthrottled stalls the game, so the trace is off until a burst is requested by
  * writing a call count to /tmp/melee-vtxtrace; the file is polled cheaply (once
  * per 512 calls) and consumed, giving a bounded burst at the moment of interest. */
@@ -197,9 +197,9 @@ static inline void SETVAT(u32* va, u32* vb, u32* vc, GXAttr attr, GXCompCnt cnt,
 extern "C" {
 
 void GXSetVtxDesc(GXAttr attr, GXAttrType type) {
-  /* melee-pc: trace descriptor setup with the caller's return address, so a VCD
+  /* OpenMelee: trace descriptor setup with the caller's return address, so a VCD
    * that is missing its POS entry can be attributed to the code path that built
-   * it. MELEE_PC_VTXCALL_LOG=1. */
+   * it. OPENMELEE_VTXCALL_LOG=1. */
   if (melee_vtxcall_trace()) {
     std::fprintf(stderr, "PROGDBG SETVTXDESC attr=%u type=%u caller=%p\n", static_cast<unsigned>(attr),
                  static_cast<unsigned>(type), MELEE_TRACE_RETURN_ADDRESS());

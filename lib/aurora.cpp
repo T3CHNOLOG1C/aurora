@@ -104,10 +104,10 @@ bool g_initialFrame = false;
 /* TEMPORARY diagnostic (2026-08-11), black-screen-before-first-input
  * investigation: dump the *present source* (the texture that gets blitted
  * into the swapchain each frame) to a PPM file on selected frames. This
- * reads back only melee-pc's own render target -- it is not a screen
+ * reads back only OpenMelee's own render target -- it is not a screen
  * capture of any kind and cannot contain anything but this process's own
- * rendering. Gated behind MELEE_PC_DUMP_FRAMES="12,60,300" (comma-separated
- * frame indices) + MELEE_PC_DUMP_DIR. Remove once the question is answered. */
+ * rendering. Gated behind OPENMELEE_DUMP_FRAMES="12,60,300" (comma-separated
+ * frame indices) + OPENMELEE_DUMP_DIR. Remove once the question is answered. */
 uint64_t g_frameIndex = 0;
 
 struct FrameDump {
@@ -125,11 +125,11 @@ bool dump_wanted(uint64_t frame) {
   static uint64_t every = 0;
   if (!parsed) {
     parsed = true;
-    const char* everyEnv = std::getenv("MELEE_PC_DUMP_EVERY");
+    const char* everyEnv = std::getenv("OPENMELEE_DUMP_EVERY");
     if (everyEnv != nullptr) {
       every = std::strtoull(everyEnv, nullptr, 10);
     }
-    const char* env = std::getenv("MELEE_PC_DUMP_FRAMES");
+    const char* env = std::getenv("OPENMELEE_DUMP_FRAMES");
     if (env != nullptr) {
       const std::string s{env};
       size_t pos = 0;
@@ -216,7 +216,7 @@ void write_frame_dump(const FrameDump& dump) {
     Log.error("Frame dump mapped range null");
     return;
   }
-  const char* dir = std::getenv("MELEE_PC_DUMP_DIR");
+  const char* dir = std::getenv("OPENMELEE_DUMP_DIR");
   if (dir == nullptr) {
     dir = "/tmp";
   }
@@ -246,7 +246,7 @@ void write_frame_dump(const FrameDump& dump) {
   char path[512];
   std::snprintf(path, sizeof(path), "%s/melee_frame_%06llu.ppm", dir,
                 static_cast<unsigned long long>(dump.frame));
-  const bool writeFile = nonBlack != 0 || std::getenv("MELEE_PC_DUMP_ALWAYS") != nullptr;
+  const bool writeFile = nonBlack != 0 || std::getenv("OPENMELEE_DUMP_ALWAYS") != nullptr;
   if (writeFile) {
     FILE* f = std::fopen(path, "wb");
     if (f == nullptr) {

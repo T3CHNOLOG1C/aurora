@@ -340,7 +340,7 @@ void OSAddToHeap(OSHeapHandle heap, void* start, void* end) {
   hd.size += cell->size;
 }
 
-// melee-pc: renamed from `OSAllocFromHeap` (see `OSFreeToHeap` below too) --
+// OpenMelee: renamed from `OSAllocFromHeap` (see `OSFreeToHeap` below too) --
 // this heap has no internal locking, matching real hardware's single-core
 // assumption. Decomp code that calls it is not itself wrapped in
 // OSDisableInterrupts (general memory allocation was never "DMA-adjacent"
@@ -348,7 +348,7 @@ void OSAddToHeap(OSHeapHandle heap, void* start, void* end) {
 // read-completion callback -- also decomp code, also capable of
 // allocating -- running concurrently on Aurora's DvdWorker thread,
 // corrupting this free-list allocator's linked structures mid-mutation.
-// melee-pc's src/os_alloc_compat.c provides the public names and
+// OpenMelee's src/os_alloc_compat.c provides the public names and
 // serializes all heap access through the same interrupt mutex
 // dvd_compat.c already uses for DVD callbacks. See
 // dolphin/os_alloc_real.h and pc_port.md for the trace that found this

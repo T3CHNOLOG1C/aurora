@@ -85,8 +85,8 @@ void copy_tex(const void* dest, GXBool clear) noexcept {
                          clear_depth_value(), texCopyFmt);
   ++handle.revision;
   g_gxState.copyTextures[dest] = handle;
-  // TEMP melee-pc diagnostic (results-portrait/magnifier blank EFB textures)
-  if (getenv("MELEE_PC_EFBCOPY_TRACE") != nullptr) {
+  // TEMP OpenMelee diagnostic (results-portrait/magnifier blank EFB textures)
+  if (getenv("OPENMELEE_EFBCOPY_TRACE") != nullptr) {
     fprintf(stderr, "AUR-COPYTEX dest=%p dst=%ux%u fmt=%d rect=%d,%d %dx%d rev=%u pixfmt=%d aupd=%d dsta=%u cupd=%d\n",
             dest, dstWidth, dstHeight, (int)texCopyFmt, rect.x, rect.y, rect.width, rect.height, handle.revision,
             (int)g_gxState.pixelFmt, (int)g_gxState.alphaUpdate, g_gxState.dstAlpha, (int)g_gxState.colorUpdate);

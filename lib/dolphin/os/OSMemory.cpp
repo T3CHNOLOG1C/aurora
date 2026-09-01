@@ -104,7 +104,7 @@ static void GuardGCMemory() {
 static void GuardGCMemory() { }
 #endif
 
-// melee-pc local patch: MEM1 must be mapped at exactly 0x80000000, on every
+// OpenMelee local patch: MEM1 must be mapped at exactly 0x80000000, on every
 // platform. This is not a preference or a debugging aid -- two independent
 // requirements pin it to this one value:
 //
@@ -194,16 +194,16 @@ static void* AllocMEM1(u32 size) {
   void* const fixedAddr = reinterpret_cast<void*>(kMEM1Address);
   int mmapFlags = MAP_PRIVATE | MAP_ANONYMOUS;
 
-#if defined(MELEE_PC_DOLSAN_BUILD)
+#if defined(OPENMELEE_DOLSAN_BUILD)
   // DolSAN (extern/dolsan) relocates ASan's shadow layout so it no longer
   // covers this address (see extern/dolsan/cmake/DolSANGekkoProfile.cmake for
   // the reserved range), so unlike plain system ASan below,
   // MAP_FIXED_NOREPLACE is safe here and preferred -- it fails loudly on an
   // unexpected collision instead of silently unmapping whatever's there.
-  // DolSAN-linked build only (MELEE_PC_ASAN_BUILD in CMakeLists.txt, which now
+  // DolSAN-linked build only (OPENMELEE_ASAN_BUILD in CMakeLists.txt, which now
   // builds against DolSAN's runtime).
   mmapFlags |= MAP_FIXED_NOREPLACE;
-#elif defined(__SANITIZE_ADDRESS__) || defined(MELEE_PC_ASAN_BUILD)
+#elif defined(__SANITIZE_ADDRESS__) || defined(OPENMELEE_ASAN_BUILD)
   // Plain system ASan (not DolSAN): it reserves this address as part of its
   // shadow gap even with ASAN_OPTIONS=protect_shadow_gap=0 (that option only
   // stops ASan from mprotecting it, not from holding a placeholder mapping
@@ -214,7 +214,7 @@ static void* AllocMEM1(u32 size) {
   // collision (system ASan's LowShadow still overlaps this address once real
   // writes land here -- see pc_port.md entries (219)/(272) and
   // extern/dolsan/PLANNING.md); kept only for whoever builds aurora_os with
-  // plain -fsanitize=address directly, outside melee-pc's own CMake plumbing.
+  // plain -fsanitize=address directly, outside OpenMelee's own CMake plumbing.
   mmapFlags |= MAP_FIXED;
 #elif defined(MAP_FIXED_NOREPLACE)
   mmapFlags |= MAP_FIXED_NOREPLACE;

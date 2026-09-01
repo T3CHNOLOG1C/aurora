@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-// melee-pc diagnostic (MELEE_PC_GXLOG="A,B"): dump every channel-control,
+// OpenMelee diagnostic (OPENMELEE_GXLOG="A,B"): dump every channel-control,
 // channel-color and light-load call during the 3-frame windows starting at
 // retrace A and retrace B, so a clean window can be diffed against a dark one
 // from the same run. Remove once the fighter-darkening bug is rooted.
@@ -21,12 +21,12 @@ extern "C" __attribute__((weak)) u32 VIGetRetraceCount(void) { return 0; }
 extern "C" u32 VIGetRetraceCount_MeleePcDefault(void) { return 0; }
 #pragma comment(linker, "/alternatename:VIGetRetraceCount=VIGetRetraceCount_MeleePcDefault")
 #endif
-static bool melee_pc_gxlog_active() {
+static bool openmelee_gxlog_active() {
   static long w1 = -1, w2 = -1;
   static bool parsed = false;
   if (!parsed) {
     parsed = true;
-    if (const char* env = getenv("MELEE_PC_GXLOG")) {
+    if (const char* env = getenv("OPENMELEE_GXLOG")) {
       w1 = strtol(env, nullptr, 10);
       if (const char* comma = strchr(env, ',')) {
         w2 = strtol(comma + 1, nullptr, 10);
@@ -173,11 +173,11 @@ void GXLoadLightObjImm(GXLightObj* light_, GXLightID id) {
   u32 idx = std::log2<u32>(id);
   auto* light = reinterpret_cast<const GXLightObj_*>(light_);
 
-  // melee-pc diagnostic (MELEE_PC_LIGHTLOG): log each GX light slot load only
+  // OpenMelee diagnostic (OPENMELEE_LIGHTLOG): log each GX light slot load only
   // when its payload changes, tagged with the aurora frame index -- catches
   // upstream light-state divergence at the exact frame it first happens.
   {
-    static const bool sLog = getenv("MELEE_PC_LIGHTLOG") != nullptr;
+    static const bool sLog = getenv("OPENMELEE_LIGHTLOG") != nullptr;
     if (sLog) {
       extern u32 VIGetRetraceCount(void);
       struct Snap { u32 color; float px, py, pz, nx, ny, nz; bool valid; };
@@ -196,7 +196,7 @@ void GXLoadLightObjImm(GXLightObj* light_, GXLightID id) {
       }
     }
   }
-  if (melee_pc_gxlog_active()) {
+  if (openmelee_gxlog_active()) {
     std::fprintf(stderr,
                  "PROGDBG GXLOG frame=%u LOAD slot=%u col=%02x%02x%02x%02x a=%.3f,%.3f,%.3f k=%.3f,%.3f,%.3f "
                  "pos=%.1f,%.1f,%.1f dir=%.3f,%.3f,%.3f\n",
@@ -255,7 +255,7 @@ void GXSetChanAmbColor(GXChannelID id, GXColor color) {
   // XF ambient color registers: 0x100A (chan 0), 0x100B (chan 1)
   u32 packed = (static_cast<u32>(color.r) << 24) | (static_cast<u32>(color.g) << 16) |
                (static_cast<u32>(color.b) << 8) | static_cast<u32>(color.a);
-  if (melee_pc_gxlog_active()) {
+  if (openmelee_gxlog_active()) {
     std::fprintf(stderr, "PROGDBG GXLOG frame=%u AMB id=%d col=%08x\n", VIGetRetraceCount(), (int)id, packed);
   }
   if (id == GX_COLOR0 || id == GX_ALPHA0) {
@@ -283,7 +283,7 @@ void GXSetChanMatColor(GXChannelID id, GXColor color) {
   // XF material color registers: 0x100C (chan 0), 0x100D (chan 1)
   u32 packed = (static_cast<u32>(color.r) << 24) | (static_cast<u32>(color.g) << 16) |
                (static_cast<u32>(color.b) << 8) | static_cast<u32>(color.a);
-  if (melee_pc_gxlog_active()) {
+  if (openmelee_gxlog_active()) {
     std::fprintf(stderr, "PROGDBG GXLOG frame=%u MAT id=%d col=%08x\n", VIGetRetraceCount(), (int)id, packed);
   }
   if (id == GX_COLOR0 || id == GX_ALPHA0) {
@@ -350,7 +350,7 @@ void GXSetChanCtrl(GXChannelID id, bool lightingEnabled, GXColorSrc ambSrc, GXCo
   }
   CHECK(id >= GX_COLOR0 && id <= GX_ALPHA1, "bad channel {}", static_cast<int>(id));
 
-  if (melee_pc_gxlog_active()) {
+  if (openmelee_gxlog_active()) {
     std::fprintf(stderr, "PROGDBG GXLOG frame=%u CHAN id=%d en=%d amb=%d mat=%d mask=%02x df=%d af=%d\n",
                  VIGetRetraceCount(), (int)id, (int)lightingEnabled, (int)ambSrc, (int)matSrc, lightState, (int)diffFn,
                  (int)attnFn);

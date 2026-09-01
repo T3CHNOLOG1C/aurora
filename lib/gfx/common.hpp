@@ -153,7 +153,7 @@ private:
       m_owned = true;
     } else if (size > m_capacity) {
       if (!m_owned) {
-        /* melee-pc: a non-owned ByteBuffer is a window into the mapped
+        /* OpenMelee: a non-owned ByteBuffer is a window into the mapped
          * staging buffer, so it cannot grow -- but aborting with no
          * information makes a frame-budget overrun indistinguishable from a
          * garbage vertex count. Say which. */
@@ -205,14 +205,14 @@ inline constexpr uint64_t IndexBufferSize = 2097152;     // 2mb
  * reason as before: this is a real, finite per-frame requirement, not a
  * leak, and headroom is cheap relative to one abort per frame that fills
  * it. */
-/* melee-pc: raised from 32mb. A four-fighter match on Peach's Castle
+/* OpenMelee: raised from 32mb. A four-fighter match on Peach's Castle
  * genuinely needs slightly more than 32mb of vertex storage in a single
  * frame -- measured at 33816576 bytes against the old 33554432 cap, i.e.
  * a real budget overrun rather than a runaway draw. The frame packet's
  * storage ByteBuffer is a non-owned window into the mapped staging
  * buffer, so overflowing it can only abort(); see the PROGDBG_GFXBUF
  * message in ByteBuffer::resize below, which is what measured this. */
-/* melee-pc: raised from 48mb (2026-08-17, Track B stage sweep). Mute
+/* OpenMelee: raised from 48mb (2026-08-17, Track B stage sweep). Mute
  * City's track/city geometry needs slightly more than 48mb in a single
  * frame -- measured at 50593792 bytes against the old 50331648 cap (an
  * overrun of just 262144 bytes), same call stack as every bump above

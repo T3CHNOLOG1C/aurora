@@ -19,17 +19,17 @@
 #include "../card/CardGciFolder.hpp"
 #include "../fs_helper.hpp"
 
-/* melee_card_compat.h and melee_pc_harness.h aren't included directly:
+/* melee_card_compat.h and openmelee_harness.h aren't included directly:
  * both live in OpenMelee's own include/ tree, which isn't on this
  * library's include path when aurora is built standalone (e.g. its own
  * CI). Declare just the symbols this file calls, matching melee_main.c's
  * own precedent for a narrow local declaration instead of a cross-tree
  * header. OpenMelee's build still provides the real definitions
- * (src/card_compat.c, src/melee_pc_harness.c); aurora_card only needs to
+ * (src/card_compat.c, src/openmelee_harness.c); aurora_card only needs to
  * *compile* standalone (e.g. its own CI just builds the library, it
  * doesn't link a final executable), so the missing symbols at link time
  * are harmless outside OpenMelee. */
-extern "C" int melee_pc_harness_no_card(void);
+extern "C" int openmelee_harness_no_card(void);
 extern "C" void melee_card_enqueue_callback(CARDCallback callback, s32 chan, s32 result);
 
 namespace {
@@ -198,7 +198,7 @@ void CARDInit(const char* game, const char* maker) {
   }
 
   std::filesystem::path cardWorkingDir;
-  // melee-pc: --nosave gives this process its own private, isolated card
+  // OpenMelee: --nosave gives this process its own private, isolated card
   // directory (under the OS temp dir, keyed by PID) instead of the shared
   // default location. Parallel test instances then each get a real,
   // normally-formatted card of their own rather than racing on the same
@@ -206,11 +206,11 @@ void CARDInit(const char* game, const char* maker) {
   // which triggers a real "no memory card, continue anyway?" prompt that
   // blocks unattended boot, exactly the problem this flag exists to avoid.
   // A launch argument rather than an env var on purpose
-  // (melee_pc_harness.h): an env var left set would silently affect every
+  // (openmelee_harness.h): an env var left set would silently affect every
   // future launch until explicitly unset.
-  if (melee_pc_harness_no_card()) {
+  if (openmelee_harness_no_card()) {
     cardWorkingDir = std::filesystem::temp_directory_path() /
-                      ("melee-pc-card-" + std::to_string(getpid()));
+                      ("OpenMelee-card-" + std::to_string(getpid()));
     std::error_code ec;
     std::filesystem::create_directories(cardWorkingDir, ec);
     // A brand-new, never-used card is a *legitimate* first-boot state on

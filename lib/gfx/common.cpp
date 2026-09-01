@@ -1638,9 +1638,9 @@ bool begin_frame() {
   pass.clearColorValue = gx::g_gxState.clearColor;
   /* TEMPORARY diagnostic (2026-08-11): override the EFB clear colour so a
    * frame readback can distinguish "nothing was rasterised at all" from
-   * "geometry was rasterised but came out black". MELEE_PC_CLEAR_MAGENTA. */
+   * "geometry was rasterised but came out black". OPENMELEE_CLEAR_MAGENTA. */
   {
-    static const bool clearMagenta = std::getenv("MELEE_PC_CLEAR_MAGENTA") != nullptr;
+    static const bool clearMagenta = std::getenv("OPENMELEE_CLEAR_MAGENTA") != nullptr;
     if (clearMagenta) {
       pass.clearColorValue = Vec4<float>{1.f, 0.f, 1.f, 1.f};
     }

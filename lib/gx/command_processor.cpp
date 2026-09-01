@@ -195,7 +195,7 @@ struct ArrayUploadKeyHash {
 
 std::unordered_map<ArrayUploadKey, gfx::Range, ArrayUploadKeyHash> sArrayUploadCache;
 
-/* melee-pc: env-gated draw probe for the Underground Maze render bug.
+/* OpenMelee: env-gated draw probe for the Underground Maze render bug.
  * For indexed-POS draws only (a stale POS array binding on a direct-vertex draw
  * is meaningless), decodes the first few vertices exactly as the shader will and
  * dumps them alongside the active position matrix.  Sane vertices with a garbage
@@ -203,7 +203,7 @@ std::unordered_map<ArrayUploadKey, gfx::Range, ArrayUploadKeyHash> sArrayUploadC
  * Logged once per unique (array, format, matrix-contents) tuple so a whole match
  * stays readable.  Remove once the bug is closed. */
 
-/* melee-pc: probes below dedupe per array for the whole run, so an object first
+/* OpenMelee: probes below dedupe per array for the whole run, so an object first
  * drawn in an earlier room never re-logs its state later.  SIGUSR1 bumps this
  * generation, which is folded into every dedupe key, so `kill -USR1 <pid>` takes
  * a fresh snapshot of whatever is on screen right now. */
@@ -227,7 +227,7 @@ u32 gxdiag_gen() noexcept {
 }
 
 
-/* melee-pc: per-frame draw-call bisection.  With MELEE_PC_GXDRAWMAX set, the cap
+/* OpenMelee: per-frame draw-call bisection.  With OPENMELEE_GXDRAWMAX set, the cap
  * is re-read every frame from /tmp/melee-drawmax so it can be changed live while
  * the game runs (`echo 250 > /tmp/melee-drawmax`) instead of needing a restart.
  * A negative or missing value means "draw everything".  The draw sitting at the
@@ -237,7 +237,7 @@ int sDrawMax = -1;
 u32 sFrameDrawIndex = 0;
 
 bool gxdiag_drawmax_active() noexcept {
-  static const bool on = getenv("MELEE_PC_GXDRAWMAX") != nullptr;
+  static const bool on = getenv("OPENMELEE_GXDRAWMAX") != nullptr;
   return on;
 }
 
@@ -290,7 +290,7 @@ void gxdiag_drawmax_refresh() noexcept {
 }
 
 
-/* melee-pc: raw vertex bytes of the most recent immediate-mode draw, so the
+/* OpenMelee: raw vertex bytes of the most recent immediate-mode draw, so the
  * bisected draw can be decoded without re-reading the FIFO. */
 char sLastDirectPos[64] = "?";
 u8 sLastVtxBytes[256];
@@ -298,7 +298,7 @@ u32 sLastVtxLen = 0;
 u32 sLastVtxSize = 0;
 
 bool gxdiag_enabled() noexcept {
-  static const bool on = getenv("MELEE_PC_GXDIAG") != nullptr;
+  static const bool on = getenv("OPENMELEE_GXDIAG") != nullptr;
   return on;
 }
 
@@ -594,7 +594,7 @@ void gxdiag_probe_pos(GXVtxFmt fmt) noexcept {
 }
 
 
-/* melee-pc: verify the POS *indices* in a display list, not just the array they
+/* OpenMelee: verify the POS *indices* in a display list, not just the array they
  * select from.  GameCube stores 16-bit indices big-endian and the shader reads
  * them that way; if the bytes were actually little-endian the mesh would keep
  * valid vertex data while triangles connected unrelated vertices.  Reports the
@@ -697,13 +697,13 @@ void gxdiag_probe_indices(GXVtxFmt fmt, std::span<const u8> vtx, u32 vtxCount, u
 }
 
 
-/* melee-pc: skip draws whose POS array matches MELEE_PC_GXSKIP (comma-separated
+/* OpenMelee: skip draws whose POS array matches OPENMELEE_GXSKIP (comma-separated
  * hex addresses).  Identifies which object is painting over the Underground Maze
  * without guessing.  Diagnostic only. */
 bool gxdiag_skip_draw() noexcept {
   static const std::set<uintptr_t> skip = [] {
     std::set<uintptr_t> out;
-    if (const char* env = getenv("MELEE_PC_GXSKIP")) {
+    if (const char* env = getenv("OPENMELEE_GXSKIP")) {
       const char* p = env;
       while (*p != '\0') {
         char* end = nullptr;
@@ -724,12 +724,12 @@ bool gxdiag_skip_draw() noexcept {
 }
 
 
-/* melee-pc: skip any draw whose projected bounding box blankets the whole screen
- * (MELEE_PC_GXSKIPFILL).  Property-based rather than per-array, so it isolates
+/* OpenMelee: skip any draw whose projected bounding box blankets the whole screen
+ * (OPENMELEE_GXSKIPFILL).  Property-based rather than per-array, so it isolates
  * screen-filling geometry without disabling unrelated objects that happen to
  * share a vertex array.  Diagnostic only. */
 bool gxdiag_skip_screenfill(GXVtxFmt fmt) noexcept {
-  static const bool on = getenv("MELEE_PC_GXSKIPFILL") != nullptr;
+  static const bool on = getenv("OPENMELEE_GXSKIPFILL") != nullptr;
   if (!on) {
     return false;
   }
@@ -785,12 +785,12 @@ bool gxdiag_skip_screenfill(GXVtxFmt fmt) noexcept {
 }
 
 
-/* melee-pc: skip perspective-space draws that have no texgens (MELEE_PC_GXSKIPFLAT).
+/* OpenMelee: skip perspective-space draws that have no texgens (OPENMELEE_GXSKIPFLAT).
  * Such a draw samples a single texel for every pixel, so a textured surface renders
  * as one flat colour.  Restricted to GX_PERSPECTIVE so the orthographic HUD is
  * untouched.  Diagnostic only. */
 bool gxdiag_skip_flat() noexcept {
-  static const bool on = getenv("MELEE_PC_GXSKIPFLAT") != nullptr;
+  static const bool on = getenv("OPENMELEE_GXSKIPFLAT") != nullptr;
   if (!on) {
     return false;
   }
@@ -805,9 +805,9 @@ bool gxdiag_skip_flat() noexcept {
 }
 
 
-/* melee-pc: immediate-mode (GX_DIRECT) draws were invisible to every indexed-POS
+/* OpenMelee: immediate-mode (GX_DIRECT) draws were invisible to every indexed-POS
  * probe in this file.  Effect/particle geometry is submitted that way, so count it
- * and allow skipping it (MELEE_PC_GXSKIPDIRECT) to test whether the Underground
+ * and allow skipping it (OPENMELEE_GXSKIPDIRECT) to test whether the Underground
  * Maze's flat orange surfaces are effects rather than stage geometry.  Diagnostic
  * only. */
 void gxdiag_count_direct(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount) noexcept {
@@ -832,7 +832,7 @@ void gxdiag_count_direct(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount) noexcept 
 }
 
 bool gxdiag_skip_direct() noexcept {
-  static const bool on = getenv("MELEE_PC_GXSKIPDIRECT") != nullptr;
+  static const bool on = getenv("OPENMELEE_GXSKIPDIRECT") != nullptr;
   if (!on) {
     return false;
   }
@@ -840,13 +840,13 @@ bool gxdiag_skip_direct() noexcept {
 }
 
 
-/* melee-pc: skip draws whose bound texture lives outside guest MEM1
- * (MELEE_PC_GXSKIPHOSTTEX).  Every genuine archive texture is a guest pointer
+/* OpenMelee: skip draws whose bound texture lives outside guest MEM1
+ * (OPENMELEE_GXSKIPHOSTTEX).  Every genuine archive texture is a guest pointer
  * (0x8.......); a host-heap texture bound to stage geometry means the material
  * resolved to something other than its archive TObj.  Address-independent, so it
  * survives the host allocator moving between runs.  Diagnostic only. */
 bool gxdiag_skip_hosttex() noexcept {
-  static const bool on = getenv("MELEE_PC_GXSKIPHOSTTEX") != nullptr;
+  static const bool on = getenv("OPENMELEE_GXSKIPHOSTTEX") != nullptr;
   if (!on) {
     return false;
   }
@@ -861,9 +861,9 @@ bool gxdiag_skip_hosttex() noexcept {
 }
 
 
-/* melee-pc: force fog off (MELEE_PC_NOFOG) as an A/B.  Diagnostic only. */
+/* OpenMelee: force fog off (OPENMELEE_NOFOG) as an A/B.  Diagnostic only. */
 bool gxdiag_nofog() noexcept {
-  static const bool on = getenv("MELEE_PC_NOFOG") != nullptr;
+  static const bool on = getenv("OPENMELEE_NOFOG") != nullptr;
   return on;
 }
 
@@ -980,11 +980,11 @@ void process(const u8* data, u32 size) noexcept {
       const u32 srcOffset = static_cast<u32>(srcArrayIdx) * array.stride;
       const u32 srcSize = static_cast<u32>(len) * sizeof(u32);
       if (array.data == nullptr) {
-        Log.error("melee-pc: LOAD_INDX fail arrayType={} srcArrayIdx={} dstAddr={:#x} len={} opcode={:#x} "
+        Log.error("OpenMelee: LOAD_INDX fail arrayType={} srcArrayIdx={} dstAddr={:#x} len={} opcode={:#x} "
                   "readerOffset={} readerSize={}",
                   arrayType, srcArrayIdx, dstAddr, len, cmd, reader.offset(), reader.size());
         for (u32 dbg = 0; dbg < GX_VA_MAX_ATTR; ++dbg) {
-          Log.error("melee-pc:   array[{}] data={:#x} size={} stride={}", dbg,
+          Log.error("OpenMelee:   array[{}] data={:#x} size={} stride={}", dbg,
                     reinterpret_cast<uintptr_t>(g_gxState.arrays[dbg].data), g_gxState.arrays[dbg].size,
                     g_gxState.arrays[dbg].stride);
         }
@@ -997,7 +997,7 @@ void process(const u8* data, u32 size) noexcept {
           for (size_t k = start; k < end; ++k) {
             hex += fmt::format("{:02x}{}", base[k], (k == curOff - 5) ? "|" : " ");
           }
-          Log.error("melee-pc:   bytes[{}..{}] (cur-5 marked): {}", start, end, hex);
+          Log.error("OpenMelee:   bytes[{}..{}] (cur-5 marked): {}", start, end, hex);
         }
       }
       AURORA_ASSERT(array.data != nullptr, "indexed XF load from unmapped array {}", arrayType);
@@ -1365,16 +1365,16 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
   if (gxdiag_enabled() || gxdiag_drawmax_active()) {
     const int limit = sDrawMax;
     const u32 idx = sFrameDrawIndex++;
-    /* MELEE_PC_GXSKIPRANGE=lo:hi drops an inclusive range of per-frame draw
+    /* OPENMELEE_GXSKIPRANGE=lo:hi drops an inclusive range of per-frame draw
      * indices, so a cluster of related draws (e.g. one effect emitting several
      * quads) can be removed together rather than one at a time. */
     if (sSkipLo >= 0 && static_cast<int>(idx) >= sSkipLo && static_cast<int>(idx) <= sSkipHi) {
-      /* MELEE_PC_GXFORCEBLEND: instead of dropping the range, render it with
+      /* OPENMELEE_GXFORCEBLEND: instead of dropping the range, render it with
        * alpha blending enabled.  These draws already carry SRCALPHA/INVSRCALPHA
        * factors but GX_BM_NONE, so if the bug is simply that blending is off,
        * this should make the effect render correctly rather than as an opaque
        * occluding mass. */
-      if (getenv("MELEE_PC_GXFORCEBLEND") != nullptr) {
+      if (getenv("OPENMELEE_GXFORCEBLEND") != nullptr) {
         if (g_gxState.blendMode != GX_BM_BLEND) {
           g_gxState.blendMode = GX_BM_BLEND;
           g_gxState.depthUpdate = false;
@@ -1398,14 +1398,14 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
                   static_cast<u32>(g_gxState.blendFacDst), g_gxState.depthUpdate, pArr.data,
                   static_cast<u32>(g_gxState.projType));
       }
-      if (getenv("MELEE_PC_GXFORCEBLEND") == nullptr) {
+      if (getenv("OPENMELEE_GXFORCEBLEND") == nullptr) {
         return;
       }
     }
-    /* Skip exactly one draw index (MELEE_PC_GXSKIPIDX) to confirm a single
+    /* Skip exactly one draw index (OPENMELEE_GXSKIPIDX) to confirm a single
      * bisected draw is solely responsible, without hiding everything after it. */
     static const int skipIdx = [] {
-      const char* e = getenv("MELEE_PC_GXSKIPIDX");
+      const char* e = getenv("OPENMELEE_GXSKIPIDX");
       return e != nullptr ? atoi(e) : -1;
     }();
     if (skipIdx >= 0 && idx == static_cast<u32>(skipIdx)) {
@@ -1645,10 +1645,10 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, Reader& read
     }
   }
 
-  /* MELEE_PC_GXSKIPBAD: drop any immediate-mode draw whose F32 positions are
+  /* OPENMELEE_GXSKIPBAD: drop any immediate-mode draw whose F32 positions are
    * non-finite or absurdly large.  Draw 166 was only the first of a class, so
    * this tests whether garbage-position geometry as a whole is the bug. */
-  if (gxdiag_enabled() && getenv("MELEE_PC_GXSKIPBAD") != nullptr &&
+  if (gxdiag_enabled() && getenv("OPENMELEE_GXSKIPBAD") != nullptr &&
       g_gxState.vtxDesc[GX_VA_POS] == GX_DIRECT) {
     const auto& pf = g_gxState.vtxFmts[fmt].attrs[GX_VA_POS];
     if (pf.type == GX_F32) {
@@ -1811,7 +1811,7 @@ void handle_aurora(Reader& reader) noexcept {
     auto& array = g_gxState.arrays[attrIdx];
     const auto newData = reinterpret_cast<void*>(arrayAddr);
     if (attrIdx >= GX_POS_MTX_ARRAY) {
-      Log.error("melee-pc: GXSetArray attrIdx={} data={:#x} size={} byteOrder={}", attrIdx, arrayAddr, arraySize,
+      Log.error("OpenMelee: GXSetArray attrIdx={} data={:#x} size={} byteOrder={}", attrIdx, arrayAddr, arraySize,
                 byteOrder);
     }
     if (array.data != newData || array.size != arraySize || array.le != le || array.wordSwapped != wordSwapped) {

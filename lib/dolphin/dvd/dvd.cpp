@@ -996,9 +996,9 @@ int DVDSetAutoFatalMessaging(BOOL enable) {
 }
 
 s32 DVDConvertPathToEntrynum(const char* pathPtr) {
-  /* melee-pc TEMPORARY diagnostic: every disc path the game resolves.
-   * MELEE_PC_TRACE_DVDOPEN=1 */
-  if (pathPtr != nullptr && std::getenv("MELEE_PC_TRACE_DVDOPEN") != nullptr) {
+  /* OpenMelee TEMPORARY diagnostic: every disc path the game resolves.
+   * OPENMELEE_TRACE_DVDOPEN=1 */
+  if (pathPtr != nullptr && std::getenv("OPENMELEE_TRACE_DVDOPEN") != nullptr) {
     std::fprintf(stderr, "PROGDBG DVDPATH %s\n", pathPtr);
     std::fflush(stderr);
   }
@@ -1162,8 +1162,8 @@ BOOL DVDChangeDir(const char* dirName) {
   return TRUE;
 }
 
-// melee-pc: renamed from `DVDReadAsyncPrio` (declaration + rename comment in
-// dolphin/dvd_real.h) so melee-pc/src/dvd_compat.c can provide its own
+// OpenMelee: renamed from `DVDReadAsyncPrio` (declaration + rename comment in
+// dolphin/dvd_real.h) so OpenMelee/src/dvd_compat.c can provide its own
 // `DVDReadAsyncPrio` that byte-swaps GC (big-endian) disc data for our
 // little-endian host before handing control back to decomp callbacks, then
 // forwards the real work here. See dvd_compat.c for why this can't be done

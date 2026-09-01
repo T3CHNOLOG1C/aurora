@@ -63,12 +63,12 @@ void GXCallDisplayList(const void* data, u32 nbytes) {
   /* TEMPORARY diagnostic (2026-08-11): record where each display list lands in
    * the FIFO, so an "unknown opcode at pos N" desync can be mapped back to the
    * display list (and therefore the caller/archive) that produced those bytes.
-   * MELEE_PC_TRACE_DL=<count>. */
+   * OPENMELEE_TRACE_DL=<count>. */
   {
     static int budget = -1;
     static int count = 0;
     if (budget < 0) {
-      const char* env = std::getenv("MELEE_PC_TRACE_DL");
+      const char* env = std::getenv("OPENMELEE_TRACE_DL");
       budget = env != nullptr ? std::atoi(env) : 0;
     }
     if (count < budget) {

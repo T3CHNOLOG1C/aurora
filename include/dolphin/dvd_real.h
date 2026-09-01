@@ -1,6 +1,6 @@
 /*
- * melee-pc local patch (see dvd.cpp): `DVDReadAsyncPrio` itself is
- * implemented natively in melee-pc/src/dvd_compat.c (byte-swap handling for
+ * OpenMelee local patch (see dvd.cpp): `DVDReadAsyncPrio` itself is
+ * implemented natively in OpenMelee/src/dvd_compat.c (byte-swap handling for
  * big-endian disc data), which forwards to the real implementation under
  * this name. Needs to become an upstream Aurora PR (or a local override
  * header, matching the project's other local Aurora patches) before this
