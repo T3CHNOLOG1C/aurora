@@ -86,6 +86,27 @@ std::vector<uint32_t> parse_cpu_list(const std::string& list) {
   return cpus;
 }
 
+/* bionic has no pthread_{get,set}affinity_np. sched_{get,set}affinity with
+ * pid 0 means "the calling thread" on Linux, which is exactly the semantics
+ * the pthread_np variants provide, so this is equivalent rather than a
+ * degraded fallback. Kept as one shim for both platforms so the call sites
+ * stay identical. */
+static inline int aurora_get_thread_affinity(cpu_set_t* set) noexcept {
+#if defined(__ANDROID__)
+  return sched_getaffinity(0, sizeof(*set), set);
+#else
+  return pthread_getaffinity_np(pthread_self(), sizeof(*set), set);
+#endif
+}
+
+static inline int aurora_set_thread_affinity(const cpu_set_t* set) noexcept {
+#if defined(__ANDROID__)
+  return sched_setaffinity(0, sizeof(*set), set);
+#else
+  return pthread_setaffinity_np(pthread_self(), sizeof(*set), const_cast<cpu_set_t*>(set));
+#endif
+}
+
 std::optional<CacheDomain> find_cache_domain() {
   const int currentCpu = sched_getcpu();
   if (currentCpu < 0) {
@@ -116,7 +137,7 @@ std::optional<CacheDomain> find_cache_domain() {
 
     cpu_set_t allowed;
     CPU_ZERO(&allowed);
-    if (pthread_getaffinity_np(pthread_self(), sizeof(allowed), &allowed) != 0) {
+    if (aurora_get_thread_affinity(&allowed) != 0) {
       continue;
     }
 
@@ -146,7 +167,7 @@ bool apply_cache_domain(const CacheDomain& domain) noexcept {
       CPU_SET(static_cast<int>(processor.number), &set);
     }
   }
-  return pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0;
+  return aurora_set_thread_affinity(&set) == 0;
 }
 #elif defined(_WIN32)
 std::optional<CacheDomain> find_cache_domain() {
