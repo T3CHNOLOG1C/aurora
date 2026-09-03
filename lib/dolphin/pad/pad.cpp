@@ -458,9 +458,19 @@ u32 PADRescanControllers() {
     for (const Uint32 instance : existing) {
       aurora::input::remove_controller(instance);
     }
-    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
-    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
-      aurora::input::Log.warn("SDL_InitSubSystem(GAMEPAD) failed: {}", SDL_GetError());
+    /* input initializes JOYSTICK explicitly alongside GAMEPAD
+     * (input.cpp SDL_Init flags), so quitting GAMEPAD alone leaves the
+     * joystick core -- and its stale device list -- running: observed
+     * live as instance ids surviving the bounce and a hot-added Steam
+     * virtual pad staying invisible while a fresh process saw it. Take
+     * the joystick subsystem down too so the device list really
+     * rebuilds. */
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK);
+    while (SDL_WasInit(SDL_INIT_JOYSTICK) != 0) {
+      SDL_QuitSubSystem(SDL_INIT_JOYSTICK);
+    }
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD | SDL_INIT_JOYSTICK)) {
+      aurora::input::Log.warn("SDL_InitSubSystem(GAMEPAD|JOYSTICK) failed: {}", SDL_GetError());
     } else if (SDL_JoystickID* ids = SDL_GetGamepads(&count); ids != nullptr) {
       for (int i = 0; i < count; ++i) {
         if (!aurora::input::g_GameControllers.contains(ids[i]) && aurora::input::add_controller(ids[i]) != -1) {
@@ -469,6 +479,25 @@ u32 PADRescanControllers() {
       }
       SDL_free(ids);
     }
+  }
+  /* Diagnose invisible pads: list every SDL *joystick* (superset of
+   * gamepads). A pad that shows up here but not as a gamepad lacks a
+   * mapping; one absent from both is invisible to SDL entirely (e.g.
+   * held exclusively by Steam Input). */
+  if (int jcount = 0; true) {
+    if (SDL_JoystickID* jids = SDL_GetJoysticks(&jcount); jids != nullptr) {
+      for (int i = 0; i < jcount; ++i) {
+        SDL_GUID guid = SDL_GetJoystickGUIDForID(jids[i]);
+        char guidStr[33] = {0};
+        SDL_GUIDToString(guid, guidStr, sizeof(guidStr));
+        aurora::input::Log.info("PADRescanControllers: joystick {} '{}' guid {} gamepad={}", jids[i],
+                                SDL_GetJoystickNameForID(jids[i]) != nullptr ? SDL_GetJoystickNameForID(jids[i])
+                                                                             : "unknown",
+                                guidStr, SDL_IsGamepad(jids[i]));
+      }
+      SDL_free(jids);
+    }
+    aurora::input::Log.info("PADRescanControllers: {} joystick(s) visible to SDL", jcount);
   }
   aurora::input::Log.info("PADRescanControllers: removed {}, added {} (total {})", stale.size(), added,
                            aurora::input::g_GameControllers.size());
