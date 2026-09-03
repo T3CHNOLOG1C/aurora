@@ -437,15 +437,27 @@ u32 PADRescanControllers() {
     aurora::input::Log.warn("SDL_GetGamepads failed during rescan: {}", SDL_GetError());
   }
 
-  /* Deck/Steam Input: when Steam reclaims the virtual controller (focus
-   * loss, overlay), the SDL device vanishes and plain enumeration never
-   * sees it again -- observed live: repeated rescans report "added 0"
-   * with the pad physically present. If a polite rescan found nothing
-   * and nothing is connected, bounce the gamepad subsystem: this forces
-   * SDL to re-enumerate HIDAPI/virtual devices from scratch. Existing
-   * handles are closed first so the map never points at freed pads. */
-  if (added == 0 && aurora::input::g_GameControllers.empty()) {
-    aurora::input::Log.info("PADRescanControllers: empty after rescan; reinitializing gamepad subsystem");
+  /* Deck/Steam Input: when Steam reclaims a controller (focus loss,
+   * overlay) or a pad connects after launch behind Steam Input, the SDL
+   * device never shows up in plain enumeration -- observed live: repeated
+   * rescans report "added 0, total 1" with a second pad physically
+   * present (only the built-in Deck controller enumerated). A rescan is
+   * an explicit user request, so when polite enumeration finds nothing
+   * new, always bounce the gamepad subsystem -- even if some controllers
+   * are connected -- to force SDL to re-enumerate HIDAPI/virtual devices
+   * from scratch. Existing handles are closed first so the map never
+   * points at freed pads; they are re-added by the enumeration below. */
+  if (added == 0) {
+    aurora::input::Log.info("PADRescanControllers: nothing new; reinitializing gamepad subsystem ({} open handle(s))",
+                            aurora::input::g_GameControllers.size());
+    std::vector<Uint32> existing;
+    existing.reserve(aurora::input::g_GameControllers.size());
+    for (const auto& [instance, controller] : aurora::input::g_GameControllers) {
+      existing.push_back(instance);
+    }
+    for (const Uint32 instance : existing) {
+      aurora::input::remove_controller(instance);
+    }
     SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
       aurora::input::Log.warn("SDL_InitSubSystem(GAMEPAD) failed: {}", SDL_GetError());
