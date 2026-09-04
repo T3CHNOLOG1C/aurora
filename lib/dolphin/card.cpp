@@ -1,5 +1,6 @@
 #include "dolphin/card.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -863,6 +864,10 @@ s32 CARDReadAsync(const CARDFileInfo* fileInfo, void* addr, const s32 length, co
 }
 
 s32 CARDWrite(const CARDFileInfo* fileInfo, const void* addr, const s32 length, const s32 offset) {
+#ifdef __ANDROID__
+  fprintf(stderr, "PROGDBG CARDWrite chan=%d fileNo=%d offset_field=%d length=%d offset_arg=%d addr=%p\n",
+          fileInfo->chan, fileInfo->fileNo, fileInfo->offset, length, offset, addr);
+#endif
   if (fileInfo->chan < 0 || fileInfo->chan >= 2) {
     return CARD_RESULT_FATAL_ERROR;
   }
